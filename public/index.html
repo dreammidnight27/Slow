@@ -1,66 +1,433 @@
 <!doctype html>
-<html>
+<html lang="en">
 	<head>
 		<meta charset="utf-8" />
-		<meta
-			name="viewport"
-			content="width=device-width, initial-scale=1.0, shrink-to-fit=no"
-		/>
-		<title>Scramjet</title>
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Slow</title>
+		<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+		<link rel="icon" href="favicon.ico?v=2" sizes="any" />
 
-		<link rel="shortcut icon" content="favicon.webp" />
-	
-		<script src="/scram/scramjet.all.js"></script>
-		<script src="/baremux/index.js"></script>
-		
-		<link rel="stylesheet" href="index.css" />
+		<script src="config.js"></script>
+		<script src="scram/scramjet.all.js"></script>
+		<script src="baremux/index.js"></script>
+
+		<link rel="stylesheet" href="index.css?v=2" />
+		<!-- Applies the "reduce motion" setting before anything animates -->
+		<script>
+			try {
+				const saved = JSON.parse(localStorage.getItem("slow.settings")) || {};
+				const reduce = saved.reduceMotion ?? matchMedia("(prefers-reduced-motion: reduce)").matches;
+				document.documentElement.dataset.motion = reduce ? "reduced" : "full";
+			} catch {}
+		</script>
 		<script src="register-sw.js" defer></script>
 		<script src="search.js" defer></script>
 		<script src="index.js" defer></script>
 	</head>
 
 	<body>
-		<div title="Scramjet Logo" class="flex-center logo-wrapper header-center">
-			<img class="logo" src="sj.png" alt="Scramjet" />
-			<h1>Scramjet | MW</h1>
-		</div>
-		<div class="flex-center desc left-margin">
-			<p>
-				Scramjet is an experimental interception based web proxy designed to
-				evade internet censorship, bypass arbitrary web browser restrictions and
-				innovate web proxy technologies.
-			</p>
+		<canvas id="stars" aria-hidden="true"></canvas>
+		<div class="nebula" aria-hidden="true"></div>
+
+		<div id="app">
+			<header class="chrome">
+				<div class="tabs-row">
+					<div class="brand" title="Slow"><svg class="brand-moon" viewBox="290 210 230 270" aria-hidden="true">
+	<defs>
+		<radialGradient id="brand-shade" gradientUnits="userSpaceOnUse" cx="480" cy="330" r="190">
+			<stop offset="0.6" style="stop-color: var(--moon-mid)" />
+			<stop offset="0.92" style="stop-color: var(--moon-light)" />
+		</radialGradient>
+	</defs>
+	<path d="M453.4 219.1A130 130 0 1 0 517.0 437.8A114 114 0 0 1 453.4 219.1Z" fill="url(#brand-shade)" />
+	<g class="globe" fill="none" stroke-width="10" style="stroke: var(--moon-base)">
+		<circle cx="445" cy="338" r="58" />
+		<ellipse cx="445" cy="338" rx="26" ry="58" />
+		<line x1="445" y1="280" x2="445" y2="396" />
+		<line x1="387" y1="338" x2="503" y2="338" />
+		<line x1="397" y1="306" x2="493" y2="306" />
+		<line x1="397" y1="370" x2="493" y2="370" />
+	</g>
+	
+</svg><span class="brand-word"><span class="brand-text">Slow</span></span></div>
+					<div id="tab-strip" role="tablist" aria-label="Open tabs"></div>
+					<button id="new-tab" class="icon-btn" type="button" aria-label="New tab"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button>
+					<button id="btn-games" class="icon-btn" type="button" aria-label="Games" title="Games" aria-haspopup="true" aria-expanded="false" aria-controls="games-menu">
+						<svg viewBox="0 0 24 24" aria-hidden="true">
+							<path d="M7.5 7h9a5 5 0 0 1 4.9 4l.9 4.6a2.7 2.7 0 0 1-4.6 2.4L15.2 16H8.8l-2.5 2a2.7 2.7 0 0 1-4.6-2.4l.9-4.6A5 5 0 0 1 7.5 7Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+							<path d="M7.5 10v4M5.5 12h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+							<circle cx="15.5" cy="11" r="1.1" fill="currentColor" />
+							<circle cx="17.8" cy="13.3" r="1.1" fill="currentColor" />
+						</svg>
+					</button>
+					<div id="games-menu" class="games-menu hidden" role="dialog" aria-label="Games">
+						<div class="games-head">
+							<div class="games-views" role="tablist" aria-label="Game lists">
+								<button type="button" role="tab" data-view="popular">Popular</button>
+								<button type="button" role="tab" data-view="gnmath">gn-math</button>
+							</div>
+							<input id="games-filter" type="text" placeholder="Find a game" autocomplete="off" spellcheck="false" aria-label="Find a game" />
+						</div>
+						<div id="games-grid" class="games-grid"></div>
+						<p id="games-note" class="games-note"></p>
+					</div>
+				</div>
+
+				<div class="toolbar">
+					<button id="btn-back" class="icon-btn" type="button" aria-label="Back"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg></button>
+					<button id="btn-forward" class="icon-btn" type="button" aria-label="Forward"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg></button>
+					<button id="btn-reload" class="icon-btn" type="button" aria-label="Reload"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9" /><path d="M20 4.5V9h-4.5" /></svg></button>
+					<button id="btn-settings" class="icon-btn" type="button" aria-label="Settings" aria-haspopup="dialog"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.18 10.22L21.49 10.57L21.49 13.43L19.18 13.78L18.34 15.82L19.72 17.70L17.70 19.72L15.82 18.34L13.78 19.18L13.43 21.49L10.57 21.49L10.22 19.18L8.18 18.34L6.30 19.72L4.28 17.70L5.66 15.82L4.82 13.78L2.51 13.43L2.51 10.57L4.82 10.22L5.66 8.18L4.28 6.30L6.30 4.28L8.18 5.66L10.22 4.82L10.57 2.51L13.43 2.51L13.78 4.82L15.82 5.66L17.70 4.28L19.72 6.30L18.34 8.18Z" /><circle cx="12" cy="12" r="3" /></svg></button>
+					<form id="sj-form">
+						<input
+							id="sj-address"
+							type="text"
+							autocomplete="off"
+							spellcheck="false"
+							placeholder="Search or enter an address"
+							aria-label="Address bar"
+						/>
+						<div id="suggest" class="suggest hidden" role="listbox"></div>
+					</form>
+					<button id="btn-palette" class="kbd-btn" type="button" aria-label="Command palette" title="Search tabs, history and actions">
+						<span class="kbd-key" data-mod>Ctrl</span><span class="kbd-key">K</span>
+					</button>
+				</div>
+			</header>
+
+			<main id="viewport">
+				<div id="loadbar" aria-hidden="true"></div>
+				<section id="home" class="intro">
+					<svg class="logo" viewBox="270 206 280 340" aria-hidden="true" shape-rendering="geometricPrecision">
+						<defs>
+							<!-- base shading: dark toward the cavity, bright on the outer limb -->
+							<radialGradient id="logo-shade" gradientUnits="userSpaceOnUse" cx="480" cy="330" r="190">
+								<stop offset="0.52" style="stop-color: var(--moon-dark)" />
+								<stop offset="0.74" style="stop-color: var(--moon-mid)" />
+								<stop offset="0.9" style="stop-color: var(--moon-base)" />
+								<stop offset="1" style="stop-color: var(--moon-light)" />
+							</radialGradient>
+							<!-- key light from the upper left, falling off to the lower right -->
+							<linearGradient id="logo-key" gradientUnits="userSpaceOnUse" x1="310" y1="225" x2="520" y2="470">
+								<stop offset="0" stop-color="#fff" stop-opacity="0.38" />
+								<stop offset="0.45" stop-color="#fff" stop-opacity="0" />
+								<stop offset="0.7" stop-color="#0a0420" stop-opacity="0" />
+								<stop offset="1" stop-color="#0a0420" stop-opacity="0.45" />
+							</linearGradient>
+							<!-- thin rim light along the outer edge -->
+							<linearGradient id="logo-rim" gradientUnits="userSpaceOnUse" x1="330" y1="230" x2="470" y2="470">
+								<stop offset="0" stop-opacity="0.95" style="stop-color: var(--moon-rim)" />
+								<stop offset="0.55" stop-opacity="0.45" style="stop-color: var(--moon-light)" />
+								<stop offset="1" stop-opacity="0" style="stop-color: var(--moon-base)" />
+							</linearGradient>
+							<linearGradient id="logo-wire" gradientUnits="userSpaceOnUse" x1="395" y1="285" x2="500" y2="395">
+								<stop offset="0" style="stop-color: var(--moon-rim)" />
+								<stop offset="0.5" style="stop-color: var(--moon-base)" />
+								<stop offset="1" style="stop-color: var(--moon-mid)" />
+							</linearGradient>
+							<radialGradient id="logo-sphere" gradientUnits="userSpaceOnUse" cx="425" cy="314" r="80">
+								<stop offset="0" stop-opacity="0.32" style="stop-color: var(--moon-light)" />
+								<stop offset="0.55" stop-opacity="0.12" style="stop-color: var(--moon-mid)" />
+								<stop offset="1" stop-opacity="0.4" style="stop-color: var(--moon-dark)" />
+							</radialGradient>
+							<clipPath id="logo-clip">
+								<path d="M453.4 219.1A130 130 0 1 0 517.0 437.8A114 114 0 0 1 453.4 219.1Z" />
+							</clipPath>
+							<filter id="logo-soft" x="-50%" y="-50%" width="200%" height="200%">
+								<feGaussianBlur stdDeviation="5" />
+							</filter>
+							<filter id="logo-glow" x="-30%" y="-30%" width="160%" height="160%">
+								<feGaussianBlur in="SourceGraphic" stdDeviation="3.5" result="blur" />
+								<feMerge>
+									<feMergeNode in="blur" />
+									<feMergeNode in="SourceGraphic" />
+								</feMerge>
+							</filter>
+						</defs>
+						<path d="M453.4 219.1A130 130 0 1 0 517.0 437.8A114 114 0 0 1 453.4 219.1Z" fill="url(#logo-shade)" />
+						<g clip-path="url(#logo-clip)">
+							<path d="M453.4 219.1A130 130 0 1 0 517.0 437.8A114 114 0 0 1 453.4 219.1Z" fill="url(#logo-key)" />
+							<path d="M453.4 219.1A130 130 0 1 0 517.0 437.8" fill="none" stroke="url(#logo-rim)" stroke-width="5" />
+							<ellipse cx="350" cy="270" rx="38" ry="11" transform="rotate(-48 350 270)" fill="#fff" opacity="0.45" filter="url(#logo-soft)" />
+						</g>
+						<circle cx="445" cy="338" r="58" fill="url(#logo-sphere)" />
+						<g class="globe" fill="none" stroke="url(#logo-wire)" stroke-width="6" stroke-linecap="round" filter="url(#logo-glow)">
+							<circle cx="445" cy="338" r="58" />
+							<!-- two meridians squeezed in turn so the globe looks like it's turning -->
+							<ellipse class="meridian" cx="445" cy="338" rx="26" ry="58" />
+							<ellipse class="meridian m2" cx="445" cy="338" rx="0.5" ry="58" />
+							<line x1="387" y1="338" x2="503" y2="338" />
+							<line x1="397" y1="306" x2="493" y2="306" />
+							<line x1="397" y1="370" x2="493" y2="370" />
+						</g>
+						<path class="sparkle" d="M484 242Q484 257 499 257Q484 257 484 272Q484 257 469 257Q484 257 484 242Z" /><path class="sparkle s2" d="M456 233Q456 241 464 241Q456 241 456 249Q456 241 448 241Q456 241 456 233Z" /><circle class="sparkle s3" cx="508" cy="270" r="6" /><circle class="sparkle s2" cx="498" cy="231" r="2.5" /><circle class="sparkle" cx="476" cy="276" r="2.5" /><path class="sparkle s3" d="M420 497Q420 512 435 512Q420 512 420 527Q420 512 405 512Q420 512 420 497Z" /><path class="sparkle" d="M392 489Q392 497 400 497Q392 497 392 505Q392 497 384 497Q392 497 392 489Z" /><circle class="sparkle s2" cx="444" cy="527" r="6" /><circle class="sparkle s3" cx="434" cy="487" r="2.5" /><circle class="sparkle" cx="412" cy="533" r="2.5" />
+					</svg>
+
+					<h1 aria-label="Slow">
+						<span aria-hidden="true" style="--i: 0">S</span><span aria-hidden="true" style="--i: 1">l</span><span aria-hidden="true" style="--i: 2">o</span><span aria-hidden="true" style="--i: 3">w</span>
+					</h1>
+					<p class="tagline"><span style="--w: 0">Take</span> <span style="--w: 1">your</span> <span style="--w: 2">time.</span></p>
+
+					<form id="home-form">
+						<input
+							id="home-search"
+							type="text"
+							autocomplete="off"
+							spellcheck="false"
+							placeholder="Search or enter an address"
+							aria-label="Search the web"
+						/>
+					</form>
+
+					<div class="quick">
+					<div class="quick-group">
+						<div id="shortcuts" class="shortcuts"></div>
+					</div>
+				</div>
+
+				<footer class="home-footer">
+						Powered by Scramjet &nbsp;|&nbsp; <a href="credits.html">Credits</a>
+					</footer>
+				</section>
+			</main>
 		</div>
 
-		<form id="sj-form" class="flex-center">
+		<!-- Command palette: one search box for tabs, history, shortcuts and actions -->
+		<dialog id="palette" class="palette" aria-label="Command palette">
 			<input
-				id="sj-search-engine"
-				value="https://www.google.com/search?q=%s"
-				type="hidden"
+				id="palette-input"
+				type="text"
+				autocomplete="off"
+				spellcheck="false"
+				placeholder="Search tabs, history, or type a command…"
+				role="combobox"
+				aria-expanded="true"
+				aria-controls="palette-list"
+				aria-autocomplete="list"
 			/>
-			<input id="sj-address" type="text" placeholder="Search the web freely" />
-		</form>
-		<div class="desc left-margin">
+			<ul id="palette-list" class="palette-list" role="listbox" aria-label="Results"></ul>
+			<footer class="palette-foot">
+				<span><kbd>↑</kbd><kbd>↓</kbd> move</span>
+				<span><kbd>Enter</kbd> open</span>
+				<span><kbd>Esc</kbd> close</span>
+			</footer>
+		</dialog>
+
+
+		<!-- Right-click menu for tabs: mute and per-tab volume, plus tab actions -->
+		<div id="tab-menu" class="tab-menu hidden" role="menu" aria-label="Tab options">
+			<button id="tab-menu-mute" class="tab-menu-item" type="button" role="menuitem">Mute tab</button>
+			<div class="tab-menu-volume">
+				<label for="tab-menu-volume">Tab volume</label>
+				<div class="tab-menu-slider">
+					<input id="tab-menu-volume" type="range" min="0" max="100" step="5" />
+					<span id="tab-menu-volume-text" class="tab-menu-percent">100%</span>
+				</div>
+			</div>
+			<div class="tab-menu-divider" role="separator"></div>
+			<button class="tab-menu-item" type="button" role="menuitem" data-action="reload" data-icon="&#8635;">Reload</button>
+			<button class="tab-menu-item" type="button" role="menuitem" data-action="duplicate" data-icon="&#10697;">Duplicate</button>
+			<button class="tab-menu-item" type="button" role="menuitem" data-action="close-others" data-icon="&#8863;">Close other tabs</button>
+			<button class="tab-menu-item" type="button" role="menuitem" data-action="close" data-icon="&times;">Close tab</button>
+		</div>
+
+		<!-- Friendly messages with optional buttons (undo, switch tab, break reminders) -->
+		<div id="notice" class="notice hidden" role="status" aria-live="polite">
+			<p id="notice-text"></p>
+			<div id="notice-actions" class="notice-actions"></div>
+		</div>
+
+		<dialog id="settings" class="settings" aria-labelledby="settings-title">
+			<form id="settings-form" method="dialog">
+				<header class="settings-head">
+					<h2 id="settings-title">Settings</h2>
+					<button class="icon-btn" value="close" aria-label="Close settings">&times;</button>
+				</header>
+
+				<div class="settings-body">
+					<section>
+						<h3>Theme</h3>
+						<div id="theme-grid" class="theme-grid settings-themes"></div>
+						<div class="custom-colors">
+							<span class="setting-text">
+								<span class="setting-name">Custom colors</span>
+								<span class="setting-hint">Pick your own. The rest of the colors (nebula, glow, logo) are made to match.</span>
+							</span>
+							<div class="color-pickers">
+								<label class="color-field">
+									<input id="custom-accent" type="color" />
+									<span>Accent</span>
+								</label>
+								<label class="color-field">
+									<input id="custom-bg" type="color" />
+									<span>Background</span>
+								</label>
+							</div>
+						</div>
+						<button id="btn-surprise" class="surprise-btn" type="button">Surprise me</button>
+					</section>
+
+					<section>
+						<h3>Search</h3>
+						<label class="setting">
+							<span class="setting-text">
+								<span class="setting-name">Search engine</span>
+								<span class="setting-hint">Used when you type something that isn't a web address.</span>
+							</span>
+							<select id="set-engine" name="searchEngine"></select>
+						</label>
+					</section>
+
+					<section>
+						<h3>Tabs</h3>
+						<label class="setting">
+							<span class="setting-text">
+								<span class="setting-name">Reopen tabs from last time</span>
+								<span class="setting-hint">Tabs come back when you return. Each one only loads when you click it, so startup stays fast.</span>
+							</span>
+							<input type="checkbox" role="switch" name="restoreTabs" />
+						</label>
+						<label class="setting">
+							<span class="setting-text">
+								<span class="setting-name">Switch to tabs that are already open</span>
+								<span class="setting-hint">Opening a site you already have open takes you to that tab instead of making a copy.</span>
+							</span>
+							<input type="checkbox" role="switch" name="dedupeTabs" />
+						</label>
+					</section>
+
+					<section>
+						<h3>Wellbeing</h3>
+						<label class="setting">
+							<span class="setting-text">
+								<span class="setting-name">Break reminders</span>
+								<span class="setting-hint">A gentle nudge to rest your eyes and stretch. Time away from the page counts as a break.</span>
+							</span>
+							<select name="breakMinutes" data-type="number">
+								<option value="0">Off</option>
+								<option value="20">Every 20 min</option>
+								<option value="30">Every 30 min</option>
+								<option value="45">Every 45 min</option>
+								<option value="60">Every hour</option>
+								<option value="90">Every 90 min</option>
+							</select>
+						</label>
+					</section>
+
+					<section>
+						<h3>New tab page</h3>
+						<label class="setting">
+							<span class="setting-text"><span class="setting-name">Show shortcuts</span></span>
+							<input type="checkbox" role="switch" name="showShortcuts" />
+						</label>
+					</section>
+
+					<section>
+						<h3>Privacy</h3>
+						<label class="setting">
+							<span class="setting-text">
+								<span class="setting-name">Remember sites I visit</span>
+								<span class="setting-hint">Kept only in this browser. Turning it off also clears it.</span>
+							</span>
+							<input type="checkbox" role="switch" name="history" />
+						</label>
+						<label class="setting">
+							<span class="setting-text">
+								<span class="setting-name">Address bar suggestions</span>
+								<span class="setting-hint">Suggests sites from your history as you type.</span>
+							</span>
+							<input type="checkbox" role="switch" name="suggestions" />
+						</label>
+						<label class="setting">
+							<span class="setting-text">
+								<span class="setting-name">Ask before leaving</span>
+								<span class="setting-hint">Warns before closing or reloading while sites are open, so tabs aren't lost.</span>
+							</span>
+							<input type="checkbox" role="switch" name="warnOnLeave" />
+						</label>
+					</section>
+
+					<section>
+						<h3>Appearance</h3>
+						<label class="setting">
+							<span class="setting-text">
+								<span class="setting-name">Reduce motion</span>
+								<span class="setting-hint">Turns off animations. Starts out matching your device's setting.</span>
+							</span>
+							<input type="checkbox" role="switch" name="reduceMotion" />
+						</label>
+						<label class="setting">
+							<span class="setting-text">
+								<span class="setting-name">Dark mode for websites</span>
+								<span class="setting-hint">Darkens bright websites. Sites that are already dark are left alone. If a site looks wrong, turn it off just for that site from the Ctrl+K menu.</span>
+							</span>
+							<input type="checkbox" role="switch" name="darkPages" />
+						</label>
+						<label class="setting">
+							<span class="setting-text">
+								<span class="setting-name">Moving star background</span>
+								<span class="setting-hint">Turn off to save battery on slower computers.</span>
+							</span>
+							<input type="checkbox" role="switch" name="stars" />
+						</label>
+					</section>
+
+					<section>
+						<h3>Sound</h3>
+						<label class="setting">
+							<span class="setting-text">
+								<span class="setting-name">Hover sound</span>
+								<span class="setting-hint">Plays when you point at a button, tab or option. Tabs sound a little lower and cards a little higher. Websites' own sound isn't affected.</span>
+							</span>
+							<select name="hoverSound">
+								<option value="click">Click</option>
+								<option value="tick">Tick</option>
+								<option value="pop">Pop</option>
+								<option value="bubble">Bubble</option>
+								<option value="glass">Glass</option>
+								<option value="thock">Keyboard thock</option>
+								<option value="blip">Blip</option>
+								<option value="whisper">Whisper</option>
+								<option value="off">Off</option>
+							</select>
+						</label>
+						<label class="setting">
+							<span class="setting-text"><span class="setting-name">Volume</span></span>
+							<input type="range" name="soundVolume" min="0.05" max="1" step="0.05" aria-label="Hover sound volume" />
+						</label>
+					</section>
+
+					<section>
+						<h3>Connection</h3>
+						<div class="setting stacked">
+							<span class="setting-text">
+								<label class="setting-name" for="set-wisp">Wisp server</label>
+								<span class="setting-hint">Leave empty to use this app's own server. Only change it if you run your own.</span>
+							</span>
+							<div class="inline-field">
+								<input id="set-wisp" type="text" spellcheck="false" autocomplete="off" />
+								<button id="save-wisp" class="pill-btn" type="button">Save</button>
+							</div>
+							<p id="wisp-note" class="setting-note" role="status"></p>
+						</div>
+					</section>
+
+					<section>
+						<h3>Your data</h3>
+						<div class="data-actions">
+							<button id="clear-history" class="pill-btn" type="button">Clear history</button>
+							<button id="clear-shortcuts" class="pill-btn" type="button">Remove all shortcuts</button>
+							<button id="reset-settings" class="pill-btn danger" type="button">Reset settings</button>
+						</div>
+					</section>
+				</div>
+			</form>
+		</dialog>
+
+		<div id="theme-flash" aria-hidden="true"></div>
+		<div id="toast" class="hidden" role="alert">
 			<p id="sj-error"></p>
 			<pre id="sj-error-code"></pre>
 		</div>
-		<footer>
-			<div>
-				<a
-					title="The Mercury Workshop GitHub organization"
-					href="https://github.com/MercuryWorkshop"
-					>Mercury Workshop</a
-				>
-				<a
-					title="The example demo app for Scramjet"
-					href="https://github.com/MercuryWorkshop/Scramjet-Demo"
-					>GitHub</a
-				>
-				<a title="License information" href="credits.html">Credits</a>
-			</div>
-			<div>
-				<span>Scramjet &copy; MW 2025</span>
-			</div>
-		</footer>
 	</body>
 </html>
