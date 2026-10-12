@@ -4,8 +4,59 @@ importScripts("scram/scramjet.all.js");
 const { ScramjetServiceWorker } = $scramjetLoadWorker();
 const scramjet = new ScramjetServiceWorker();
 
+/* ---------- keep websites' cookies (logins, preferences, "you passed the CAPTCHA") ----------
+   Scramjet 1.1.0 keeps cookies in this worker's memory, and the browser restarts the worker
+   often (even after ~30 seconds idle), so they were lost:
+   - cookies sent by websites' servers were never saved, only kept in memory;
+   - the ones that were saved were never loaded back (its loader ignores saved data).
+   So Slow loads them itself when the worker starts, and saves them whenever they change. */
+
+function cookieDB() {
+	return new Promise((resolve, reject) => {
+		const open = indexedDB.open("$scramjet");
+		open.onsuccess = () => resolve(open.result);
+		open.onerror = () => reject(open.error);
+	});
+}
+
+async function readSavedCookies() {
+	const db = await cookieDB();
+	if (!db.objectStoreNames.contains("cookies")) return null;
+	return new Promise((resolve) => {
+		const get = db.transaction("cookies").objectStore("cookies").get("cookies");
+		get.onsuccess = () => resolve(get.result);
+		get.onerror = () => resolve(null);
+	});
+}
+
+const cookiesLoaded = readSavedCookies()
+	.then((saved) => {
+		const cookies = typeof saved === "string" ? JSON.parse(saved) : saved;
+		// Keep anything set in the moment before loading finished.
+		if (cookies) scramjet.cookieStore.cookies = { ...cookies, ...scramjet.cookieStore.cookies };
+	})
+	.catch(() => {});
+
+let lastSavedCookies = null;
+let cookieSaveTimer = null;
+
+function saveCookiesSoon() {
+	clearTimeout(cookieSaveTimer);
+	cookieSaveTimer = setTimeout(async () => {
+		const dump = scramjet.cookieStore.dump();
+		if (dump === lastSavedCookies) return;
+		try {
+			const db = await cookieDB();
+			if (!db.objectStoreNames.contains("cookies")) return;
+			db.transaction("cookies", "readwrite").objectStore("cookies").put(JSON.parse(dump), "cookies");
+			lastSavedCookies = dump;
+		} catch {}
+	}, 500);
+}
+
 async function handleRequest(event) {
 	await scramjet.loadConfig();
+	await cookiesLoaded;
 	if (scramjet.route(event)) {
 		if (event.request.method === "HEAD") return headRequest(event);
 		return scramjet.fetch(event);
@@ -68,6 +119,10 @@ const SCRAMJET_SCRIPTS =
 // Slow's per-tab volume control, added right after Scramjet's scripts so it's in place
 // before the page's own scripts make any sound. (A full address, so a page's <base> can't move it.)
 const TAB_VOLUME_SCRIPT = `<script src="${new URL("tab-volume.js", self.location.href).href}"></script>`;
+
+// Any response can set cookies (pages, images, scripts...), so check after each one.
+// Saving only happens when something actually changed.
+scramjet.addEventListener("handleResponse", saveCookiesSoon);
 
 scramjet.addEventListener("handleResponse", (event) => {
 	if (event.destination !== "document" && event.destination !== "iframe") return;

@@ -479,6 +479,11 @@ function updateView() {
 	const showingFrame = Boolean(current && current.frame);
 	home.classList.toggle("hidden", showingFrame);
 
+	// The first-load reveal stays as it is until you first leave the new tab page. Switching
+	// it to the quicker comeback fade then, while the page is hidden, means nothing visibly
+	// changes. (Switching while it's on screen made the title flicker and the logo twitch.)
+	if (showingFrame) home.classList.remove("intro");
+
 	const target = showingFrame ? current.frame.frame : home;
 	if (target !== lastShown) {
 		playEnter(target);
@@ -1127,9 +1132,6 @@ applyTheme(
 	{ animate: false },
 );
 
-// After the first-load reveal finishes, switch to the quicker fade used when
-// you come back to the new tab page later.
-setTimeout(() => home.classList.remove("intro"), 5000);
 
 /* ============================================================
    STARFIELD
@@ -1152,6 +1154,7 @@ setTimeout(() => home.classList.remove("intro"), 5000);
 	let ty = 0;
 	let nextShoot = performance.now() + 8000;
 
+	// Sends a shooting star across right away ("Surprise me" uses this).
 	window.__slowStar = () => {
 		if (!calm() && settings.stars) shoot = { x: w * 0.75, y: h * 0.12, born: performance.now() };
 	};
@@ -1183,9 +1186,7 @@ setTimeout(() => home.classList.remove("intro"), 5000);
 				s.x -= s.depth * 0.05;
 				if (s.x < 0) s.x = w;
 			}
-			ctx.globalAlpha = still
-				? 0.8
-				: 0.45 + 0.45 * Math.sin((t / 1800) * s.depth + s.phase);
+			ctx.globalAlpha = still ? 0.8 : 0.45 + 0.45 * Math.sin((t / 1800) * s.depth + s.phase);
 			ctx.beginPath();
 			ctx.arc(s.x - px * 30 * s.depth, s.y - py * 30 * s.depth, s.r, 0, Math.PI * 2);
 			ctx.fill();
@@ -1255,20 +1256,6 @@ setTimeout(() => home.classList.remove("intro"), 5000);
 	refresh();
 })();
 
-/* ---------- the logo and title lean toward the mouse on the new tab page ---------- */
-
-function resetParallax() {
-	home.style.setProperty("--mx", "0");
-	home.style.setProperty("--my", "0");
-}
-
-home.addEventListener("pointermove", (event) => {
-	if (calm()) return;
-	home.style.setProperty("--mx", (event.clientX / window.innerWidth - 0.5).toFixed(3));
-	home.style.setProperty("--my", (event.clientY / window.innerHeight - 0.5).toFixed(3));
-});
-home.addEventListener("pointerleave", resetParallax);
-
 /* ============================================================
    SETTINGS PANEL
    ============================================================ */
@@ -1287,7 +1274,6 @@ for (const [id, engine] of Object.entries(SEARCH_ENGINES)) {
 // Puts every setting into effect. Safe to call any time.
 function applySettings() {
 	document.documentElement.dataset.motion = settings.reduceMotion ? "reduced" : "full";
-	if (settings.reduceMotion) resetParallax();
 	window.__slowStarfield?.();
 
 	shortcutsEl.closest(".quick-group").classList.toggle("hidden", !settings.showShortcuts);
@@ -1440,7 +1426,14 @@ function notify(message, actions = [], timeout = 7000) {
 	notice.classList.remove("hidden", "leaving");
 	playEnter(notice);
 	clearTimeout(noticeTimer);
-	if (timeout) noticeTimer = setTimeout(hideNotice, timeout);
+	// A thin bar along the bottom counts down until it closes by itself.
+	notice.classList.remove("timed");
+	if (timeout) {
+		notice.style.setProperty("--life", `${timeout}ms`);
+		void notice.offsetWidth;
+		notice.classList.add("timed");
+		noticeTimer = setTimeout(hideNotice, timeout);
+	}
 }
 
 // When a new version of Slow's service worker takes over while Slow is open, offer a reload.
@@ -2549,6 +2542,44 @@ document.addEventListener("pointerover", (event) => {
 	const pitch = HOVER_PITCH.find(([selector]) => target.matches(selector))?.[1] ?? 1;
 	sfx.hover(pitch);
 });
+
+/* ============================================================
+   EXTRA ANIMATIONS
+   All of these skip themselves when "Reduce motion" is on.
+   ============================================================ */
+
+/* ---------- a glass highlight that glides to the active tab ---------- */
+
+const tabGlider = document.createElement("div");
+tabGlider.className = "tab-glider";
+tabGlider.setAttribute("aria-hidden", "true");
+tabStrip.prepend(tabGlider);
+
+function placeTabGlider() {
+	const el = activeTab()?.el;
+	if (!el || !el.isConnected) {
+		tabGlider.style.opacity = "0";
+		return;
+	}
+	tabGlider.style.opacity = "1";
+	tabGlider.style.width = `${el.offsetWidth}px`;
+	tabGlider.style.transform = `translateX(${el.offsetLeft}px)`;
+}
+
+// Tabs change size as they open, close and the window resizes, so follow them.
+const tabSizes = new ResizeObserver(placeTabGlider);
+tabSizes.observe(tabStrip);
+new MutationObserver(() => {
+	for (const tab of tabs) if (tab.el && !tab.el.dataset.watched) {
+		tab.el.dataset.watched = "1";
+		tabSizes.observe(tab.el);
+	}
+	placeTabGlider();
+}).observe(tabStrip, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+
+placeTabGlider();
+// The first placement jumps straight there; after that it glides.
+requestAnimationFrame(() => requestAnimationFrame(() => tabGlider.classList.add("ready")));
 
 /* ---------- start up: bring back last time's tabs, or open a fresh one ---------- */
 

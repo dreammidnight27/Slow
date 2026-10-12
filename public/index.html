@@ -125,11 +125,6 @@
 								<stop offset="0.5" style="stop-color: var(--moon-base)" />
 								<stop offset="1" style="stop-color: var(--moon-mid)" />
 							</linearGradient>
-							<radialGradient id="logo-sphere" gradientUnits="userSpaceOnUse" cx="425" cy="314" r="80">
-								<stop offset="0" stop-opacity="0.32" style="stop-color: var(--moon-light)" />
-								<stop offset="0.55" stop-opacity="0.12" style="stop-color: var(--moon-mid)" />
-								<stop offset="1" stop-opacity="0.4" style="stop-color: var(--moon-dark)" />
-							</radialGradient>
 							<clipPath id="logo-clip">
 								<path d="M453.4 219.1A130 130 0 1 0 517.0 437.8A114 114 0 0 1 453.4 219.1Z" />
 							</clipPath>
@@ -146,21 +141,28 @@
 						</defs>
 						<path d="M453.4 219.1A130 130 0 1 0 517.0 437.8A114 114 0 0 1 453.4 219.1Z" fill="url(#logo-shade)" />
 						<g clip-path="url(#logo-clip)">
+							<!-- the globe casts a soft shadow onto the moon behind it -->
+							<circle cx="452" cy="346" r="62" fill="#05020f" opacity="0.45" filter="url(#logo-soft)" />
 							<path d="M453.4 219.1A130 130 0 1 0 517.0 437.8A114 114 0 0 1 453.4 219.1Z" fill="url(#logo-key)" />
 							<path d="M453.4 219.1A130 130 0 1 0 517.0 437.8" fill="none" stroke="url(#logo-rim)" stroke-width="5" />
-							<ellipse cx="350" cy="270" rx="38" ry="11" transform="rotate(-48 350 270)" fill="#fff" opacity="0.45" filter="url(#logo-soft)" />
+							<g id="logo-glint">
+								<ellipse cx="350" cy="270" rx="38" ry="11" transform="rotate(-48 350 270)" fill="#fff" opacity="0.45" filter="url(#logo-soft)" />
+							</g>
 						</g>
-						<circle cx="445" cy="338" r="58" fill="url(#logo-sphere)" />
-						<g class="globe" fill="none" stroke="url(#logo-wire)" stroke-width="6" stroke-linecap="round" filter="url(#logo-glow)">
-							<circle cx="445" cy="338" r="58" />
+						<!-- the globe: the classic "web" icon -->
+						<circle cx="445" cy="338" r="62" class="atmosphere" filter="url(#logo-soft)" />
+						<circle cx="445" cy="338" r="57" class="web-fill" />
+						<g class="globe web-icon">
+							<circle cx="445" cy="338" r="57" />
 							<!-- two meridians squeezed in turn so the globe looks like it's turning -->
-							<ellipse class="meridian" cx="445" cy="338" rx="26" ry="58" />
-							<ellipse class="meridian m2" cx="445" cy="338" rx="0.5" ry="58" />
-							<line x1="387" y1="338" x2="503" y2="338" />
-							<line x1="397" y1="306" x2="493" y2="306" />
-							<line x1="397" y1="370" x2="493" y2="370" />
+							<ellipse class="meridian" cx="445" cy="338" rx="26" ry="57" />
+							<ellipse class="meridian m2" cx="445" cy="338" rx="0.5" ry="57" />
+							<line x1="388" y1="338" x2="502" y2="338" />
+							<line x1="396" y1="309" x2="494" y2="309" />
+							<line x1="396" y1="367" x2="494" y2="367" />
 						</g>
-						<path class="sparkle" d="M484 242Q484 257 499 257Q484 257 484 272Q484 257 469 257Q484 257 484 242Z" /><path class="sparkle s2" d="M456 233Q456 241 464 241Q456 241 456 249Q456 241 448 241Q456 241 456 233Z" /><circle class="sparkle s3" cx="508" cy="270" r="6" /><circle class="sparkle s2" cx="498" cy="231" r="2.5" /><circle class="sparkle" cx="476" cy="276" r="2.5" /><path class="sparkle s3" d="M420 497Q420 512 435 512Q420 512 420 527Q420 512 405 512Q420 512 420 497Z" /><path class="sparkle" d="M392 489Q392 497 400 497Q392 497 392 505Q392 497 384 497Q392 497 392 489Z" /><circle class="sparkle s2" cx="444" cy="527" r="6" /><circle class="sparkle s3" cx="434" cy="487" r="2.5" /><circle class="sparkle" cx="412" cy="533" r="2.5" />
+
+						<path class="sparkle" d="M484 242Q484 257 499 257Q484 257 484 272Q484 257 469 257Q484 257 484 242Z" /><circle class="sparkle s2" cx="506" cy="272" r="4" /><path class="sparkle s3" d="M420 497Q420 512 435 512Q420 512 420 527Q420 512 405 512Q420 512 420 497Z" />
 					</svg>
 
 					<h1 aria-label="Slow">

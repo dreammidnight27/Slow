@@ -1,6 +1,13 @@
 @import url("https://fonts.googleapis.com/css2?family=Unbounded:wght@300;500&family=DM+Sans:wght@400;500&family=Cormorant+Garamond:ital,wght@1,500;1,600&display=swap");
 
 :root {
+	/* Motion: one smooth, decelerating curve and a few shared speeds, used everywhere */
+	--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+	--ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+	--dur-fast: 140ms; /* hovers and presses */
+	--dur-mid: 220ms; /* menus, switches, small things moving */
+	--dur-slow: 380ms; /* panels and page changes */
+
 	--void: #07050f;
 	--nebula: #4a2c8f;
 	--aurora: #b98cff;
@@ -100,7 +107,7 @@ body {
 	box-shadow:
 		inset 0 1px 0 rgba(255, 255, 255, 0.1),
 		0 10px 30px rgba(0, 0, 0, 0.12);
-	animation: chrome-in 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+	animation: chrome-in 0.6s var(--ease-out) both;
 }
 
 #viewport {
@@ -178,7 +185,7 @@ body {
 		background 0.2s ease,
 		box-shadow 0.25s ease,
 		transform 0.2s ease;
-	animation: tab-in 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+	animation: tab-in var(--dur-mid) var(--ease-out);
 }
 
 .tab:hover {
@@ -250,7 +257,7 @@ body {
 	color: var(--starlight);
 	font-size: 17px;
 	cursor: pointer;
-	transition: background 0.15s;
+	transition: background var(--dur-fast) ease;
 }
 
 .icon-btn:hover {
@@ -388,21 +395,15 @@ body {
 		drop-shadow(0 2px 2px color-mix(in srgb, var(--void) 80%, transparent));
 }
 
-/* metallic letters in the theme's moon colors, with a light sweep passing over them */
+/* metallic letters in the theme's moon colors */
 #home h1 span {
 	display: inline-block;
 	padding: 0 0.06em;
 	margin: 0 -0.06em;
 	color: transparent;
-	background-image:
-		linear-gradient(100deg, transparent 42%, rgba(255, 255, 255, 0.95) 50%, transparent 58%),
-		linear-gradient(180deg, var(--starlight) 12%, var(--moon-light) 52%, var(--moon-base) 96%);
-	background-size: 300% 100%, 100% 100%;
-	background-position: 100% 0, 0 0;
-	background-repeat: no-repeat;
+	background-image: linear-gradient(180deg, var(--starlight) 12%, var(--moon-light) 52%, var(--moon-base) 96%);
 	-webkit-background-clip: text;
 	background-clip: text;
-	animation: shimmer 7s calc(2.4s + var(--i) * 0.12s) ease-in-out infinite;
 }
 
 /* the letter spacing trails the last letter; pull it back so the word stays centered */
@@ -434,16 +435,6 @@ body {
 		linear-gradient(270deg, transparent, color-mix(in srgb, var(--moon-light) 85%, transparent)) no-repeat;
 	background-size: 7px 7px, calc(100% - 9px) 1px;
 	background-position: left center, right center;
-}
-
-@keyframes shimmer {
-	0% {
-		background-position: 100% 0, 0 0;
-	}
-	28%,
-	100% {
-		background-position: 0% 0, 0 0;
-	}
 }
 
 .tagline {
@@ -539,16 +530,15 @@ body {
 @keyframes chrome-in {
 	from {
 		opacity: 0;
-		transform: translateY(-100%);
+		transform: translateY(-12px);
 	}
 }
 
+/* position and fade only, so opening a tab never makes the row stutter */
 @keyframes tab-in {
 	from {
 		opacity: 0;
-		flex-basis: 0;
-		min-width: 0;
-		transform: translateY(8px) scale(0.96);
+		transform: translateY(4px);
 	}
 }
 
@@ -565,7 +555,7 @@ body {
 @keyframes rise {
 	from {
 		opacity: 0;
-		transform: translateY(40px) scale(0.55) rotate(-40deg);
+		transform: translateY(18px) scale(0.94);
 	}
 }
 
@@ -573,7 +563,7 @@ body {
 @keyframes fade-up {
 	from {
 		opacity: 0;
-		transform: translateY(12px);
+		transform: translateY(8px);
 	}
 }
 
@@ -605,14 +595,14 @@ body {
 @keyframes toast-in {
 	from {
 		opacity: 0;
-		transform: translate(-50%, 16px);
+		transform: translate(-50%, 8px);
 	}
 }
 
 @keyframes toast-out {
 	to {
 		opacity: 0;
-		transform: translate(-50%, 16px);
+		transform: translate(-50%, 6px);
 	}
 }
 
@@ -620,15 +610,13 @@ body {
 
 .intro .logo {
 	animation:
-		rise 1.4s 0.1s cubic-bezier(0.16, 1, 0.3, 1) both,
+		rise 1s 0.1s var(--ease-out) both,
 		drift 14s 1.5s ease-in-out infinite alternate;
 }
 
 #home.intro h1 span {
 	display: inline-block;
-	animation:
-		slow-in 2.9s calc(0.35s + var(--i) * 0.07s) cubic-bezier(0.05, 0.75, 0.1, 1) both,
-		shimmer 7s calc(2.6s + var(--i) * 0.12s) ease-in-out infinite;
+	animation: slow-in 2.9s calc(0.35s + var(--i) * 0.07s) cubic-bezier(0.05, 0.75, 0.1, 1) both;
 }
 
 /* "Slow": the letters start spread apart and blurred with a motion trail, rush
@@ -652,12 +640,12 @@ body {
 /* once the word settles, the ornament lines stretch slowly outward from it */
 #home.intro h1::before {
 	transform-origin: right center;
-	animation: line-grow 1.6s 2s cubic-bezier(0.16, 1, 0.3, 1) both;
+	animation: line-grow 1.6s 2s var(--ease-out) both;
 }
 
 #home.intro h1::after {
 	transform-origin: left center;
-	animation: line-grow 1.6s 2s cubic-bezier(0.16, 1, 0.3, 1) both;
+	animation: line-grow 1.6s 2s var(--ease-out) both;
 }
 
 @keyframes line-grow {
@@ -692,28 +680,26 @@ body {
 /* ---- switching between pages and the new tab page ---- */
 
 #home.enter:not(.intro) {
-	animation: focus-in 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+	animation: focus-in var(--dur-slow) var(--ease-out) both;
 }
 
 .sj-frame.enter {
-	animation: focus-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+	animation: focus-in var(--dur-slow) var(--ease-out) both;
 }
 
 .sj-frame.leaving {
-	animation: fade-out 0.2s ease forwards;
+	animation: fade-out var(--dur-mid) var(--ease-in-out) forwards;
 	pointer-events: none;
 }
 
 /* ---- tabs ---- */
 
 .tab.closing {
-	animation: tab-out 0.2s ease forwards;
+	animation: tab-out var(--dur-mid) var(--ease-in-out) forwards;
 	pointer-events: none;
 }
 
-.tab:not(.active):hover {
-	transform: translateY(-1px);
-}
+
 
 .tab.loading .tab-title::before {
 	content: "";
@@ -734,36 +720,28 @@ body {
 		transform 0.25s ease;
 }
 
-.tab-close:hover {
-	transform: rotate(90deg);
-}
+
 
 /* ---- buttons ---- */
 
 .icon-btn {
 	transition:
 		background 0.15s,
-		transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+		transform var(--dur-mid) var(--ease-out);
 }
 
 .icon-btn:active {
-	transform: scale(0.88);
+	transform: scale(0.94);
 }
 
-#new-tab:hover {
-	transform: rotate(90deg);
-}
 
-#new-tab:active {
-	transform: rotate(90deg) scale(0.88);
-}
 
 #btn-back:active {
-	transform: translateX(-3px) scale(0.92);
+	transform: translateX(-2px) scale(0.94);
 }
 
 #btn-forward:active {
-	transform: translateX(3px) scale(0.92);
+	transform: translateX(2px) scale(0.94);
 }
 
 #btn-reload.spin {
@@ -776,61 +754,6 @@ body {
 	transition:
 		border-color 0.2s,
 		box-shadow 0.3s;
-}
-
-/* while typing, two arcs of light orbit the search box's border */
-@property --orbit {
-	syntax: "<angle>";
-	inherits: false;
-	initial-value: 0deg;
-}
-
-#home-form {
-	position: relative;
-	border-radius: 27px;
-	transition: scale 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-#home-form:focus-within {
-	scale: 1.02;
-}
-
-#home-form::before {
-	content: "";
-	position: absolute;
-	inset: 0;
-	z-index: 1;
-	padding: 1.5px;
-	border-radius: inherit;
-	background: conic-gradient(
-		from var(--orbit),
-		transparent 0deg,
-		var(--aurora) 50deg,
-		var(--starlight) 75deg,
-		transparent 130deg 180deg,
-		var(--aurora) 230deg,
-		var(--starlight) 255deg,
-		transparent 310deg
-	);
-	-webkit-mask:
-		linear-gradient(#000 0 0) content-box,
-		linear-gradient(#000 0 0);
-	-webkit-mask-composite: xor;
-	mask-composite: exclude;
-	opacity: 0;
-	pointer-events: none;
-	transition: opacity 0.3s ease;
-}
-
-#home-form:focus-within::before {
-	opacity: 1;
-	animation: orbit 3.5s linear infinite;
-}
-
-@keyframes orbit {
-	to {
-		--orbit: 360deg;
-	}
 }
 
 /* ---- logo and title ---- */
@@ -850,7 +773,7 @@ body {
 		animation-timing-function: cubic-bezier(0.61, 1, 0.88, 1);
 	}
 	50% {
-		rx: 58px;
+		rx: 57px;
 		animation-timing-function: cubic-bezier(0.12, 0, 0.39, 0);
 	}
 	100% {
@@ -858,28 +781,11 @@ body {
 	}
 }
 
-/* follows the mouse a little (--mx/--my are set by index.js), and lifts on hover */
-.logo {
-	translate: calc(var(--mx, 0) * -16px) calc(var(--my, 0) * -12px);
-	transition:
-		translate 0.8s cubic-bezier(0.16, 1, 0.3, 1),
-		scale 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.logo:hover {
-	scale: 1.07;
-}
-
-#home h1 {
-	translate: calc(var(--mx, 0) * 8px) calc(var(--my, 0) * 5px);
-	transition: translate 0.9s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
 @keyframes focus-in {
 	from {
 		opacity: 0;
-		filter: blur(10px);
-		transform: scale(0.97);
+		filter: blur(3px);
+		transform: scale(0.99);
 	}
 }
 
@@ -917,11 +823,11 @@ body {
 /* ---- error toast ---- */
 
 #toast {
-	animation: toast-in 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+	animation: toast-in var(--dur-slow) var(--ease-out);
 }
 
 #toast.leaving {
-	animation: toast-out 0.2s ease forwards;
+	animation: toast-out var(--dur-mid) var(--ease-in-out) forwards;
 }
 
 /* ---- "Reduce motion" (a setting that starts out matching the system) turns all of the above off ---- */
@@ -955,7 +861,7 @@ body {
 	font: inherit;
 	font-size: 13px;
 	cursor: pointer;
-	transition: background 0.15s;
+	transition: background var(--dur-fast) ease;
 }
 
 .text-btn:hover {
@@ -983,7 +889,7 @@ body {
 	color: var(--starlight);
 	font: inherit;
 	cursor: pointer;
-	animation: fade-up 0.45s calc(var(--i) * 0.05s) cubic-bezier(0.2, 0.8, 0.2, 1) both;
+	animation: fade-up var(--dur-slow) calc(var(--i) * 0.04s) var(--ease-out) both;
 }
 
 .shortcut-letter {
@@ -997,7 +903,7 @@ body {
 	background: radial-gradient(circle at 35% 30%, var(--planet-a), var(--planet-b) 55%, var(--planet-c));
 	box-shadow: 0 0 0 1px var(--line);
 	transition:
-		transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+		transform var(--dur-mid) var(--ease-out),
 		box-shadow 0.3s ease;
 }
 
@@ -1011,12 +917,12 @@ body {
 }
 
 .shortcut:hover .shortcut-letter {
-	transform: translateY(-3px) scale(1.06);
+	transform: translateY(-1px) scale(1.03);
 	box-shadow: 0 0 22px color-mix(in srgb, var(--aurora) 45%, transparent);
 }
 
 .shortcut:active .shortcut-letter {
-	transform: scale(0.94);
+	transform: scale(0.97);
 }
 
 .shortcut:focus-visible .shortcut-letter {
@@ -1246,7 +1152,7 @@ body {
 	width: 18px;
 	height: 20px;
 	flex: none;
-	transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+	transition: transform var(--dur-mid) var(--ease-out);
 }
 
 /* The word "Slow" hides behind the moon, and slides out while you hover the logo. */
@@ -1260,8 +1166,8 @@ body {
 	margin-left: 0;
 	overflow: hidden;
 	transition:
-		max-width 0.45s cubic-bezier(0.16, 1, 0.3, 1),
-		margin-left 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+		max-width 0.45s var(--ease-out),
+		margin-left 0.45s var(--ease-out);
 }
 
 .brand-text {
@@ -1271,7 +1177,7 @@ body {
 	opacity: 0;
 	transform: translateX(-110%);
 	transition:
-		transform 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+		transform 0.45s var(--ease-out),
 		opacity 0.3s ease;
 }
 
@@ -1286,7 +1192,7 @@ body {
 }
 
 .brand:hover .brand-moon {
-	transform: rotate(-12deg) scale(1.08);
+	transform: rotate(-8deg);
 }
 
 /* the theme change flash */
@@ -1325,7 +1231,7 @@ body {
 @keyframes pop-in {
 	from {
 		opacity: 0;
-		transform: translateY(-6px) scale(0.94);
+		transform: translateY(-4px) scale(0.98);
 	}
 }
 
@@ -1359,12 +1265,12 @@ body {
 	transition:
 		background 0.2s ease,
 		border-color 0.2s ease,
-		transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+		transform var(--dur-mid) var(--ease-out);
 }
 
 .theme-option:hover {
 	background: var(--glass);
-	transform: translateY(-2px);
+	transform: translateY(-1px);
 }
 
 .theme-option[aria-pressed="true"] {
@@ -1383,12 +1289,12 @@ body {
 	border-radius: 50%;
 	box-shadow: 0 0 0 1px var(--line);
 	transition:
-		transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+		transform var(--dur-mid) var(--ease-out),
 		box-shadow 0.3s ease;
 }
 
 .theme-option:hover .swatch {
-	transform: scale(1.08);
+	transform: scale(1.04);
 	box-shadow: 0 0 18px rgba(255, 255, 255, 0.2);
 }
 
@@ -1410,7 +1316,7 @@ body {
 	font-weight: 500;
 	cursor: pointer;
 	transition:
-		transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+		transform var(--dur-mid) var(--ease-out),
 		filter 0.2s ease;
 }
 
@@ -1420,7 +1326,7 @@ body {
 }
 
 .surprise-btn:active {
-	transform: scale(0.97);
+	transform: scale(0.98);
 }
 
 .surprise-btn:disabled {
@@ -1447,7 +1353,7 @@ body {
 }
 
 .settings[open] {
-	animation: settings-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+	animation: settings-in var(--dur-slow) var(--ease-out);
 }
 
 .settings::backdrop {
@@ -1458,7 +1364,7 @@ body {
 @keyframes settings-in {
 	from {
 		opacity: 0;
-		transform: translateY(14px) scale(0.97);
+		transform: translateY(8px) scale(0.985);
 	}
 }
 
@@ -1578,7 +1484,7 @@ body {
 	border-radius: 50%;
 	background: var(--starlight);
 	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-	transition: translate 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+	transition: translate var(--dur-mid) var(--ease-out);
 }
 
 .setting input[type="checkbox"]:checked {
@@ -1672,11 +1578,11 @@ body {
 
 /* the gear turns a little on hover */
 #btn-settings .ico {
-	transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+	transition: transform var(--dur-mid) var(--ease-out);
 }
 
 #btn-settings:hover .ico {
-	transform: rotate(60deg);
+	transform: rotate(45deg);
 }
 
 /* ---------- themes and custom colors in settings ---------- */
@@ -1819,7 +1725,7 @@ body {
 }
 
 .palette[open] {
-	animation: palette-in 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+	animation: palette-in var(--dur-mid) var(--ease-out);
 }
 
 .palette::backdrop {
@@ -1830,7 +1736,7 @@ body {
 @keyframes palette-in {
 	from {
 		opacity: 0;
-		transform: translateY(-10px) scale(0.98);
+		transform: translateY(-6px) scale(0.985);
 	}
 }
 
@@ -1960,11 +1866,11 @@ body {
 }
 
 .notice.enter {
-	animation: toast-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+	animation: toast-in var(--dur-slow) var(--ease-out);
 }
 
 .notice.leaving {
-	animation: toast-out 0.2s ease forwards;
+	animation: toast-out var(--dur-mid) var(--ease-in-out) forwards;
 }
 
 #notice-text {
@@ -1994,7 +1900,7 @@ body {
 	font-size: 13px;
 	white-space: nowrap;
 	cursor: pointer;
-	transition: background 0.15s;
+	transition: background var(--dur-fast) ease;
 }
 
 .notice-btn:first-child {
@@ -2037,7 +1943,7 @@ body {
 #btn-games svg {
 	width: 21px;
 	height: 21px;
-	transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+	transition: transform var(--dur-mid) var(--ease-out);
 }
 
 #btn-games:hover {
@@ -2045,7 +1951,7 @@ body {
 }
 
 #btn-games:hover svg {
-	transform: rotate(-12deg) scale(1.1);
+	transform: rotate(-6deg);
 }
 
 #btn-games.on {
@@ -2067,7 +1973,7 @@ body {
 	-webkit-backdrop-filter: blur(16px);
 	box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
 	transform-origin: top right;
-	animation: pop-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+	animation: pop-in var(--dur-mid) var(--ease-out) both;
 }
 
 .games-head {
@@ -2120,21 +2026,21 @@ body {
 	color: var(--starlight);
 	font: inherit;
 	cursor: pointer;
-	animation: fade-up 0.35s calc(var(--i) * 0.025s) cubic-bezier(0.16, 1, 0.3, 1) both;
+	animation: fade-up var(--dur-slow) calc(var(--i) * 0.02s) var(--ease-out) both;
 	transition:
-		transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
+		transform var(--dur-mid) var(--ease-out),
 		border-color 0.2s,
 		background 0.2s;
 }
 
 .game:hover {
-	transform: translateY(-2px);
+	transform: translateY(-1px);
 	border-color: hsl(var(--hue) 80% 65% / 0.5);
 	background: linear-gradient(160deg, hsl(var(--hue) 70% 55% / 0.28), hsl(var(--hue) 70% 30% / 0.1));
 }
 
 .game:active {
-	transform: scale(0.96);
+	transform: scale(0.98);
 }
 
 .game:focus-visible {
@@ -2151,11 +2057,11 @@ body {
 	border-radius: 12px;
 	background: hsl(var(--hue) 70% 50% / 0.22);
 	font-size: 22px;
-	transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+	transition: transform var(--dur-mid) var(--ease-out);
 }
 
 .game:hover .game-icon {
-	transform: scale(1.1) rotate(-6deg);
+	transform: scale(1.04);
 }
 
 .game-name {
@@ -2253,7 +2159,7 @@ body {
 	border-radius: 8px;
 	background: rgba(238, 240, 255, 0.06);
 	object-fit: cover;
-	transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+	transition: transform var(--dur-mid) var(--ease-out);
 }
 
 .game-cover.letter {
@@ -2266,7 +2172,7 @@ body {
 }
 
 .game.cover:hover .game-cover {
-	transform: scale(1.04);
+	transform: scale(1.02);
 }
 
 .game.cover .game-name {
@@ -2335,7 +2241,7 @@ body {
 	-webkit-backdrop-filter: blur(16px);
 	box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
 	transform-origin: top left;
-	animation: pop-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+	animation: pop-in var(--dur-mid) var(--ease-out) both;
 }
 
 .tab-menu-item {
@@ -2414,4 +2320,91 @@ body {
 	height: 1px;
 	margin: 4px 6px;
 	background: rgba(238, 240, 255, 0.08);
+}
+
+/* ============================================================
+   EXTRA ANIMATIONS
+   ============================================================ */
+
+/* ---------- sliding tab highlight ---------- */
+
+#tab-strip {
+	position: relative;
+}
+
+.tab {
+	position: relative;
+	z-index: 1;
+}
+
+/* the glider draws the active tab's glass now */
+.tab.active {
+	background: transparent;
+	box-shadow: none;
+}
+
+.tab-glider {
+	position: absolute;
+	bottom: 0;
+	left: 0;
+	z-index: 0;
+	height: 34px;
+	border-radius: 10px 10px 0 0;
+	background: rgba(255, 255, 255, 0.035);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.1),
+		0 -6px 18px -10px color-mix(in srgb, var(--moon-base) 70%, transparent);
+	pointer-events: none;
+}
+
+.tab-glider.ready {
+	transition:
+		transform var(--dur-slow) var(--ease-out),
+		width var(--dur-slow) var(--ease-out),
+		opacity var(--dur-mid) ease;
+}
+
+/* ---------- notice countdown bar ---------- */
+
+.notice {
+	overflow: hidden;
+}
+
+.notice.timed::after {
+	content: "";
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	height: 2px;
+	background: linear-gradient(90deg, var(--moon-base), var(--aurora));
+	transform-origin: left;
+	animation: countdown var(--life, 7s) linear forwards;
+}
+
+@keyframes countdown {
+	from {
+		transform: scaleX(1);
+	}
+	to {
+		transform: scaleX(0);
+	}
+}
+
+/* ---------- home logo: the "web" globe icon ---------- */
+
+.logo .web-fill {
+	fill: color-mix(in srgb, var(--moon-dark) 85%, var(--void));
+}
+
+.logo .web-icon {
+	fill: none;
+	stroke: var(--moon-rim);
+	stroke-width: 5;
+	stroke-linecap: round;
+}
+
+.logo .atmosphere {
+	fill: var(--moon-base);
+	opacity: 0.4;
 }
