@@ -10,10 +10,21 @@ async function handleRequest(event) {
 		if (event.request.method === "HEAD") return headRequest(event);
 		return scramjet.fetch(event);
 	}
-	const response = await fetch(event.request);
+	const response = await fetch(fresh(event.request));
 	const { mode, destination } = event.request;
 	const needsHeaders = mode === "navigate" || destination === "worker" || destination === "sharedworker";
 	return needsHeaders ? isolated(response) : response;
+}
+
+// Slow's own files are always checked with the server (a tiny request when nothing changed),
+// so an update shows up right away instead of after the host's cache time (10 minutes on GitHub Pages).
+function fresh(request) {
+	const ownFile = request.method === "GET" && request.url.startsWith(self.registration.scope);
+	if (!ownFile) return request;
+	if (request.mode === "navigate") {
+		return new Request(request.url, { cache: "no-cache", credentials: "same-origin", redirect: "manual" });
+	}
+	return new Request(request, { cache: "no-cache" });
 }
 
 // Adds the headers that make Slow's own pages and workers "cross-origin isolated", for hosts that

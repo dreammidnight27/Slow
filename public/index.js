@@ -1443,6 +1443,15 @@ function notify(message, actions = [], timeout = 7000) {
 	if (timeout) noticeTimer = setTimeout(hideNotice, timeout);
 }
 
+// When a new version of Slow's service worker takes over while Slow is open, offer a reload.
+// (Not on the very first visit, when there was no worker before.)
+if (navigator.serviceWorker) {
+	const hadWorker = Boolean(navigator.serviceWorker.controller);
+	navigator.serviceWorker.addEventListener("controllerchange", () => {
+		if (hadWorker) notify("Slow was updated.", [{ label: "Reload", run: () => location.reload() }], 0);
+	});
+}
+
 function hideNotice() {
 	clearTimeout(noticeTimer);
 	if (notice.classList.contains("hidden")) return;
