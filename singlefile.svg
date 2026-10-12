@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600">
-    <!-- SVG Background / Border -->
-    <rect width="100%" height="100%" fill="#f4f4f4" rx="10" />
-
-    <!-- Embedding live HTML inside SVG -->
-    <foreignObject x="20" y="20" width="760" height="560">
-        <iframe src="https://dreammidnight27.github.io/Slow/" width="100%" height="100%" style="border: 1px solid #ccc;"></iframe>
-    </foreignObject>
-</svg>
