@@ -4,5 +4,6 @@ window.SLOW_CONFIG = {
 	// Leave empty to use the one built into Slow's own server (`npm start`).
 	// GitHub Pages can't run a wisp server, so set this when publishing there.
 	// People can still change it for themselves in Settings > Connection.
-	wisp: "",
+	// Mercury Workshop's public wisp server (the makers of Scramjet).
+	wisp: "wss://wisp.mercurywork.shop/",
 };
