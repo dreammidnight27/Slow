@@ -1,27 +1,289 @@
 <!doctype html>
-<html>
+<html lang="en">
 	<head>
 		<meta charset="utf-8" />
-		<meta
-			name="viewport"
-			content="width=device-width, initial-scale=1.0, shrink-to-fit=no"
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Lost in space | Slow</title>
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link
+			rel="stylesheet"
+			href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600&family=DM+Sans:wght@400;500&display=swap"
 		/>
-		<title>Scramjet | Error</title>
-		<base href="/" />
-		<link rel="shortcut icon" content="favicon.ico" />
-		<link rel="stylesheet" href="index.css" />
+		<!--
+			This page can be shown at any address (GitHub Pages uses it for every missing page),
+			so it keeps everything inside itself: styles, logo and script. No links to other files.
+		-->
+		<style>
+			:root {
+				--void: #07050f;
+				--bg-1: #2a1763;
+				--nebula-1: rgba(150, 80, 220, 0.28);
+				--aurora: #b98cff;
+				--starlight: #f3eeff;
+				--moon-dark: #2a1757;
+				--moon-mid: #5a33b0;
+				--moon-base: #9a66ff;
+				--moon-light: #c4a3ff;
+				--moon-rim: #f1e8ff;
+			}
+
+			* {
+				box-sizing: border-box;
+			}
+
+			html,
+			body {
+				height: 100%;
+				margin: 0;
+			}
+
+			body {
+				display: grid;
+				place-items: center;
+				padding: 24px 16px;
+				overflow: hidden;
+				font-family: "DM Sans", system-ui, sans-serif;
+				color: var(--starlight);
+				text-align: center;
+				background:
+					radial-gradient(ellipse at 20% 10%, var(--bg-1) 0%, transparent 55%),
+					radial-gradient(circle at 70% 70%, var(--nebula-1), transparent 45%),
+					var(--void);
+			}
+
+			/* a sprinkle of stars, placed by the script below */
+			.stars {
+				position: fixed;
+				inset: 0;
+				pointer-events: none;
+			}
+
+			.star {
+				position: absolute;
+				width: 2px;
+				height: 2px;
+				border-radius: 50%;
+				background: var(--starlight);
+				animation: twinkle 3s ease-in-out infinite;
+			}
+
+			@keyframes twinkle {
+				50% {
+					opacity: 0.2;
+				}
+			}
+
+			main {
+				position: relative;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				max-width: 520px;
+			}
+
+			.logo {
+				width: clamp(100px, 18vh, 150px);
+				filter: drop-shadow(0 0 18px color-mix(in srgb, var(--moon-base) 45%, transparent));
+				animation:
+					drift-in 1.2s cubic-bezier(0.16, 1, 0.3, 1) both,
+					float 6s 1.2s ease-in-out infinite alternate;
+			}
+
+			@keyframes drift-in {
+				from {
+					opacity: 0;
+					transform: translate(-40px, 30px) rotate(-30deg) scale(0.7);
+				}
+			}
+
+			/* lost in space: the moon slowly tumbles */
+			@keyframes float {
+				to {
+					transform: translateY(-12px) rotate(8deg);
+				}
+			}
+
+			h1 {
+				margin: 14px 0 4px;
+				font-family: "Cormorant Garamond", Georgia, serif;
+				font-style: italic;
+				font-weight: 600;
+				font-size: clamp(80px, 18vw, 140px);
+				line-height: 1;
+				color: transparent;
+				background-image:
+					linear-gradient(100deg, transparent 42%, rgba(255, 255, 255, 0.9) 50%, transparent 58%),
+					linear-gradient(180deg, var(--starlight) 12%, var(--moon-light) 52%, var(--moon-base) 96%);
+				background-size: 300% 100%, 100% 100%;
+				background-position: 100% 0, 0 0;
+				background-repeat: no-repeat;
+				-webkit-background-clip: text;
+				background-clip: text;
+				filter: drop-shadow(0 0 22px color-mix(in srgb, var(--moon-base) 50%, transparent));
+				animation:
+					rise 1s 0.2s cubic-bezier(0.16, 1, 0.3, 1) both,
+					shimmer 6s 1.4s ease-in-out infinite;
+			}
+
+			@keyframes shimmer {
+				0% {
+					background-position: 100% 0, 0 0;
+				}
+				28%,
+				100% {
+					background-position: 0% 0, 0 0;
+				}
+			}
+
+			@keyframes rise {
+				from {
+					opacity: 0;
+					transform: translateY(16px);
+				}
+			}
+
+			.lead {
+				margin: 8px 0 4px;
+				font-size: 20px;
+				font-weight: 500;
+				animation: rise 0.9s 0.45s ease both;
+			}
+
+			.detail {
+				margin: 0 0 28px;
+				font-size: 14.5px;
+				line-height: 1.5;
+				color: rgba(238, 240, 255, 0.6);
+				animation: rise 0.9s 0.6s ease both;
+			}
+
+			.detail code {
+				padding: 1px 6px;
+				border-radius: 6px;
+				background: rgba(255, 255, 255, 0.07);
+				word-break: break-all;
+			}
+
+			.home {
+				display: inline-flex;
+				align-items: center;
+				gap: 8px;
+				height: 46px;
+				padding: 0 24px;
+				border: 1px solid rgba(255, 255, 255, 0.12);
+				border-radius: 23px;
+				background: color-mix(in srgb, var(--moon-base) 22%, transparent);
+				color: var(--starlight);
+				font-size: 15px;
+				font-weight: 500;
+				text-decoration: none;
+				box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+				animation: rise 0.9s 0.75s ease both;
+				transition:
+					background 0.2s ease,
+					transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+			}
+
+			.home:hover {
+				background: color-mix(in srgb, var(--moon-base) 36%, transparent);
+				transform: translateY(-2px);
+			}
+
+			.home:focus-visible {
+				outline: 2px solid var(--aurora);
+				outline-offset: 3px;
+			}
+
+			@media (prefers-reduced-motion: reduce) {
+				*,
+				*::before,
+				*::after {
+					animation: none !important;
+					transition: none !important;
+				}
+			}
+		</style>
+		<script>
+			// Use the theme picked in Slow, so this page matches it.
+			(() => {
+				const THEMES = {
+					aurora: ["#06141a", "#0b3b3a", "rgba(60, 220, 160, 0.25)", "#6dffb1", "#e8fff6", "#0b3b3a", "#1f8a73", "#3ec9a0", "#9dffd6", "#e8fff6"],
+					ember: ["#1a0a0a", "#4a1420", "rgba(255, 110, 80, 0.25)", "#ff8a5c", "#fff1e6", "#4a1420", "#a8361f", "#ff7a45", "#ffc08a", "#fff1e6"],
+					bubblegum: ["#1b0a24", "#3d1260", "rgba(255, 100, 200, 0.25)", "#ff7ad9", "#fff0fb", "#3d1260", "#9a2a8f", "#ff5fbf", "#ffb0e3", "#fff0fb"],
+					solar: ["#140e04", "#4a2c00", "rgba(255, 180, 60, 0.22)", "#ffd27a", "#fff7e6", "#4a2c00", "#a85a10", "#ff9d4d", "#ffd27a", "#fff7e6"],
+					midnight: ["#08080c", "#1a1a2e", "rgba(200, 200, 255, 0.12)", "#cfd6ff", "#f2f2f7", "#1a1a2e", "#4a4e70", "#8a8fb3", "#cfd6ff", "#ffffff"],
+				};
+				const NAMES = ["--void", "--bg-1", "--nebula-1", "--aurora", "--starlight", "--moon-dark", "--moon-mid", "--moon-base", "--moon-light", "--moon-rim"];
+				try {
+					const theme = localStorage.getItem("slow.theme");
+					let colors = THEMES[theme];
+					if (theme === "custom") {
+						const custom = JSON.parse(localStorage.getItem("slow.customColors")) || {};
+						const a = custom.accent || "#b98cff";
+						const bg = custom.bg || "#07050f";
+						colors = [bg, `color-mix(in srgb, ${a} 30%, ${bg})`, `color-mix(in srgb, ${a} 25%, transparent)`, a, "#f6f4ff", `color-mix(in srgb, ${a} 25%, #000)`, `color-mix(in srgb, ${a} 55%, #000)`, a, `color-mix(in srgb, ${a} 60%, #fff)`, `color-mix(in srgb, ${a} 15%, #fff)`];
+					}
+					if (colors) NAMES.forEach((name, i) => document.documentElement.style.setProperty(name, colors[i]));
+				} catch {}
+			})();
+		</script>
 	</head>
 
 	<body>
-		<div class="logo-wrapper left-margin">
-			<h1>Scramjet | Error</h1>
-		</div>
-		<div class="desc left-margin">
-			<p>The server could not route your request.</p>
-		</div>
-		<footer>
-			<a title="License information" href="credits.html">Credits</a>
-			<span>Scramjet &copy; MW 2025</span>
-		</footer>
+		<div class="stars" aria-hidden="true"></div>
+
+		<main>
+			<svg class="logo" viewBox="285 205 240 280" aria-hidden="true">
+				<defs>
+					<radialGradient id="shade" gradientUnits="userSpaceOnUse" cx="480" cy="330" r="190">
+						<stop offset="0.52" style="stop-color: var(--moon-dark)" />
+						<stop offset="0.74" style="stop-color: var(--moon-mid)" />
+						<stop offset="0.9" style="stop-color: var(--moon-base)" />
+						<stop offset="1" style="stop-color: var(--moon-light)" />
+					</radialGradient>
+				</defs>
+				<path d="M453.4 219.1A130 130 0 1 0 517.0 437.8A114 114 0 0 1 453.4 219.1Z" fill="url(#shade)" />
+				<g fill="none" stroke-width="7" stroke-linecap="round" style="stroke: var(--moon-light)">
+					<circle cx="445" cy="338" r="58" />
+					<ellipse cx="445" cy="338" rx="26" ry="58" />
+					<line x1="387" y1="338" x2="503" y2="338" />
+					<line x1="397" y1="306" x2="493" y2="306" />
+					<line x1="397" y1="370" x2="493" y2="370" />
+				</g>
+			</svg>
+
+			<h1>404</h1>
+			<p class="lead">This page drifted off into space.</p>
+			<p class="detail">There's nothing at <code id="path"></code>. Take your time, and head back to Slow.</p>
+			<a id="home" class="home" href="/">&#8592; Back to Slow</a>
+		</main>
+
+		<script>
+			// Where Slow lives: "/repo-name/" on a GitHub Pages project site, otherwise "/".
+			const parts = location.pathname.split("/").filter(Boolean);
+			const base = location.hostname.endsWith(".github.io") && parts.length ? `/${parts[0]}/` : "/";
+			document.getElementById("home").href = base;
+			document.getElementById("path").textContent = decodeURIComponent(location.pathname);
+
+			// The tab icon too, from Slow's own folder.
+			const icon = document.createElement("link");
+			icon.rel = "icon";
+			icon.type = "image/svg+xml";
+			icon.href = base + "favicon.svg";
+			document.head.append(icon);
+
+			// Scatter some stars.
+			const sky = document.querySelector(".stars");
+			for (let i = 0; i < 70; i++) {
+				const star = document.createElement("span");
+				star.className = "star";
+				star.style.left = `${Math.random() * 100}%`;
+				star.style.top = `${Math.random() * 100}%`;
+				star.style.opacity = String(0.3 + Math.random() * 0.7);
+				star.style.transform = `scale(${0.5 + Math.random()})`;
+				star.style.animationDelay = `${Math.random() * 3}s`;
+				sky.append(star);
+			}
+		</script>
 	</body>
 </html>
