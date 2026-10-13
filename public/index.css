@@ -296,7 +296,28 @@ body {
 
 #sj-form {
 	flex: 1;
+	min-width: 0; /* lets the address box shrink on narrow screens */
 	margin-left: 6px;
+}
+
+@media (max-width: 480px) {
+	.toolbar {
+		gap: 2px;
+		padding: 6px 8px;
+	}
+
+	.toolbar .icon-btn {
+		width: 32px;
+		height: 32px;
+	}
+
+	#btn-forward {
+		display: none;
+	}
+
+	#sj-address {
+		padding: 0 14px;
+	}
 }
 
 #sj-address {
@@ -701,13 +722,56 @@ body {
 
 
 
-.tab.loading .tab-title::before {
+/* the site's icon at the start of each tab */
+.tab-icon {
+	flex: none;
+	display: grid;
+	place-items: center;
+	width: 16px;
+	height: 16px;
+	margin-right: 9px;
+}
+
+.tab-icon img {
+	grid-area: 1 / 1;
+	width: 16px;
+	height: 16px;
+	border-radius: 3px;
+	object-fit: contain;
+}
+
+/* no icon: a simple globe */
+.tab-icon.none img {
+	display: none;
+}
+
+.tab-icon.none::after {
 	content: "";
-	display: inline-block;
-	width: 8px;
-	height: 8px;
-	margin-right: 8px;
-	border: 1.5px solid var(--aurora);
+	grid-area: 1 / 1;
+	width: 15px;
+	height: 15px;
+	background: currentColor;
+	opacity: 0.55;
+	-webkit-mask: var(--globe) center / contain no-repeat;
+	mask: var(--globe) center / contain no-repeat;
+}
+
+:root {
+	--globe: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M3 12h18M12 3c2.6 2.8 2.6 15.2 0 18M12 3c-2.6 2.8-2.6 15.2 0 18'/%3E%3C/svg%3E");
+}
+
+/* loading: a spinning ring in its place */
+.tab-icon.spin img,
+.tab-icon.spin::after {
+	display: none;
+}
+
+.tab-icon.spin::before {
+	content: "";
+	grid-area: 1 / 1;
+	width: 11px;
+	height: 11px;
+	border: 1.6px solid var(--aurora);
 	border-top-color: transparent;
 	border-radius: 50%;
 	animation: spin 0.8s linear infinite;
@@ -964,9 +1028,11 @@ body {
 	white-space: nowrap;
 }
 
-/* address bar suggestions */
+/* suggestions under the address bar and the new tab page's search */
 
-#sj-form {
+#sj-form,
+#home-form {
+	z-index: 5; /* keeps its suggestions above the shortcuts below it */
 	position: relative;
 }
 
@@ -978,34 +1044,71 @@ body {
 	z-index: 20;
 	display: flex;
 	flex-direction: column;
-	gap: 2px;
+	gap: 1px;
 	padding: 6px;
 	border: 1px solid var(--line);
 	border-radius: 14px;
-	background: rgba(12, 10, 36, 0.92);
-	backdrop-filter: blur(14px);
-	-webkit-backdrop-filter: blur(14px);
+	background: color-mix(in srgb, var(--void) 94%, transparent);
+	backdrop-filter: blur(16px);
+	-webkit-backdrop-filter: blur(16px);
 	box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
-	animation: fade-up 0.2s ease both;
+	text-align: left;
+	animation: fade-in 0.12s ease both;
 }
 
 .suggest-item {
-	display: block;
-	width: 100%;
-	padding: 8px 12px;
-	border: none;
+	display: flex;
+	align-items: center;
+	gap: 11px;
+	min-width: 0;
+	height: 36px;
+	padding: 0 12px;
 	border-radius: 9px;
-	background: none;
-	color: inherit;
-	font: inherit;
-	text-align: left;
+	color: rgba(238, 240, 255, 0.85);
 	cursor: pointer;
 }
 
-.suggest-item:hover,
-.suggest-item:focus-visible {
+.suggest-item[aria-selected="true"] {
 	background: var(--glass-strong);
-	outline: none;
+	color: var(--starlight);
+}
+
+.suggest-icon {
+	flex: none;
+	width: 16px;
+	height: 16px;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.8;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+	color: rgba(238, 240, 255, 0.45);
+}
+
+.suggest-item[aria-selected="true"] .suggest-icon {
+	color: var(--aurora);
+}
+
+.suggest-item .item-title {
+	flex: 0 1 auto;
+	min-width: 0;
+	font-size: 14px;
+	color: inherit;
+}
+
+.suggest-item .item-title b {
+	font-weight: 600;
+	color: var(--starlight);
+}
+
+.suggest-item .item-url {
+	flex: 1 1 0;
+	min-width: 0;
+	font-size: 12.5px;
+}
+
+.suggest-item .item-url::before {
+	content: "— ";
 }
 
 /* first-load reveal for the new section */
@@ -1791,6 +1894,13 @@ body {
 	color: var(--aurora);
 }
 
+.palette-icon img {
+	width: 16px;
+	height: 16px;
+	border-radius: 3px;
+	object-fit: contain;
+}
+
 .palette-icon.shortcut {
 	color: var(--moon-light);
 }
@@ -1959,57 +2069,147 @@ body {
 	color: var(--aurora);
 }
 
+/* a full page over everything, opened by the controller button */
 .games-menu {
-	position: absolute;
-	top: 44px;
-	right: 10px;
-	z-index: 40;
-	width: min(440px, calc(100vw - 20px));
-	padding: 14px;
-	border: 1px solid var(--line);
-	border-radius: 16px;
-	background: color-mix(in srgb, var(--void) 95%, transparent);
-	backdrop-filter: blur(16px);
-	-webkit-backdrop-filter: blur(16px);
-	box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
-	transform-origin: top right;
-	animation: pop-in var(--dur-mid) var(--ease-out) both;
+	position: fixed;
+	inset: 0;
+	z-index: 60;
+	background: color-mix(in srgb, var(--void) 92%, transparent);
+	backdrop-filter: blur(18px);
+	-webkit-backdrop-filter: blur(18px);
+	animation: fade-in var(--dur-mid) var(--ease-out) both;
+}
+
+.games-page {
+	display: flex;
+	flex-direction: column;
+	width: min(1200px, 100%);
+	height: 100%;
+	margin: 0 auto;
+	padding: 22px 24px 16px;
+}
+
+.games-top {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 16px;
+}
+
+.games-top h2 {
+	margin: 0;
+	font-family: "Cormorant Garamond", Georgia, serif;
+	font-style: italic;
+	font-weight: 500;
+	font-size: 34px;
+	color: var(--starlight);
+}
+
+.games-total {
+	margin-left: 10px;
+	font-family: "DM Sans", system-ui, sans-serif;
+	font-style: normal;
+	font-size: 15px;
+	font-weight: 400;
+	color: rgba(238, 240, 255, 0.5);
+	font-variant-numeric: tabular-nums;
+}
+
+.games-top .icon-btn {
+	width: 36px;
+	height: 36px;
+	font-size: 24px;
 }
 
 .games-head {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	justify-content: space-between;
 	gap: 12px;
-	margin-bottom: 12px;
+	margin-bottom: 16px;
 }
 
-.games-head .menu-title {
-	margin: 0;
+/* search box: magnifier, then the field, then a clear button while there's text */
+.games-search {
+	position: relative;
+	display: flex;
+	align-items: center;
+	width: 260px;
+}
+
+.games-search .ico {
+	position: absolute;
+	left: 12px;
+	width: 15px;
+	height: 15px;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.8;
+	stroke-linecap: round;
+	color: rgba(238, 240, 255, 0.45);
+	pointer-events: none;
 }
 
 #games-filter {
-	width: 150px;
-	height: 30px;
-	padding: 0 12px;
+	width: 100%;
+	height: 36px;
+	padding: 0 34px;
 	border: 1px solid rgba(238, 240, 255, 0.1);
-	border-radius: 15px;
+	border-radius: 18px;
 	background: rgba(238, 240, 255, 0.05);
 	color: var(--starlight);
 	font: inherit;
-	font-size: 13px;
+	font-size: 13.5px;
 	outline: none;
+	transition:
+		border-color 0.2s,
+		background 0.2s;
+}
+
+#games-filter::-webkit-search-cancel-button {
+	display: none;
 }
 
 #games-filter:focus {
 	border-color: color-mix(in srgb, var(--aurora) 60%, transparent);
+	background: rgba(238, 240, 255, 0.08);
+}
+
+#games-clear {
+	position: absolute;
+	right: 6px;
+	display: grid;
+	place-items: center;
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	border: none;
+	border-radius: 50%;
+	background: rgba(238, 240, 255, 0.08);
+	color: rgba(238, 240, 255, 0.7);
+	font-size: 16px;
+	line-height: 1;
+	cursor: pointer;
+}
+
+#games-clear:hover {
+	background: rgba(238, 240, 255, 0.16);
+	color: var(--starlight);
+}
+
+#games-clear[hidden] {
+	display: none;
 }
 
 .games-grid {
+	flex: 1;
+	min-height: 0;
 	display: grid;
-	grid-template-columns: repeat(3, 1fr);
-	gap: 8px;
-	max-height: min(430px, calc(100vh - 170px));
+	grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+	align-content: start;
+	gap: 12px;
+	padding: 2px;
 	overflow-y: auto;
 }
 
@@ -2026,11 +2226,14 @@ body {
 	color: var(--starlight);
 	font: inherit;
 	cursor: pointer;
-	animation: fade-up var(--dur-slow) calc(var(--i) * 0.02s) var(--ease-out) both;
 	transition:
 		transform var(--dur-mid) var(--ease-out),
 		border-color 0.2s,
 		background 0.2s;
+}
+
+.games-grid.animate .game {
+	animation: fade-up var(--dur-slow) calc(min(var(--i), 24) * 0.015s) var(--ease-out) both;
 }
 
 .game:hover {
@@ -2093,17 +2296,7 @@ body {
 	color: rgba(238, 240, 255, 0.4);
 }
 
-@media (max-width: 420px) {
-	.games-grid {
-		grid-template-columns: repeat(2, 1fr);
-	}
-}
-
-/* ---------- games menu: list switch and gn-math cover grid ---------- */
-
-.games-menu {
-	width: min(520px, calc(100vw - 20px));
-}
+/* ---------- games page: list switch and cover grid ---------- */
 
 .games-views {
 	display: flex;
@@ -2138,7 +2331,7 @@ body {
 }
 
 .games-grid.covers {
-	grid-template-columns: repeat(4, 1fr);
+	grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
 }
 
 .game.cover {
@@ -2171,6 +2364,24 @@ body {
 	color: var(--moon-light);
 }
 
+img.game-cover {
+	transition:
+		opacity 0.35s ease,
+		transform var(--dur-mid) var(--ease-out);
+}
+
+img.game-cover.waiting {
+	opacity: 0;
+}
+
+/* Popular and Multiplayer games in All: their icon on their own color */
+.game-cover.icon {
+	display: grid;
+	place-items: center;
+	font-size: 40px;
+	background: linear-gradient(160deg, hsl(var(--hue, 230) 70% 55% / 0.28), hsl(var(--hue, 230) 70% 30% / 0.1));
+}
+
 .game.cover:hover .game-cover {
 	transform: scale(1.02);
 }
@@ -2179,30 +2390,23 @@ body {
 	font-size: 12px;
 }
 
-.games-more {
+.games-sentinel {
 	grid-column: 1 / -1;
-	height: 36px;
-	margin-top: 4px;
-	border: 1px solid var(--line);
-	border-radius: 18px;
-	background: var(--glass);
-	color: var(--starlight);
-	font: inherit;
-	font-size: 13px;
-	cursor: pointer;
-}
-
-.games-more:hover {
-	background: var(--glass-strong);
+	height: 1px;
 }
 
 @media (max-width: 480px) {
-	.games-grid.covers {
-		grid-template-columns: repeat(3, 1fr);
+	.games-page {
+		padding: 16px 16px 12px;
 	}
 
-	#games-filter {
-		width: 120px;
+	.games-grid,
+	.games-grid.covers {
+		grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+	}
+
+	.games-search {
+		width: 100%;
 	}
 }
 
@@ -2407,4 +2611,334 @@ body {
 .logo .atmosphere {
 	fill: var(--moon-base);
 	opacity: 0.4;
+}
+
+/* cursor trail layer: over everything, never in the way of clicks */
+.cursor-trail {
+	position: fixed;
+	inset: 0;
+	z-index: 9999;
+	width: 100%;
+	height: 100%;
+	pointer-events: none;
+}
+
+/* it's a "popover" so it can sit above open panels; undo the browser's popover styling */
+.cursor-trail:popover-open {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	overflow: visible;
+}
+
+/* trail color: the mode picker and the color swatch side by side */
+.trail-color {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 8px;
+}
+
+.trail-color input[type="color"] {
+	width: 34px;
+	height: 34px;
+	padding: 0;
+	border: 1px solid var(--line);
+	border-radius: 50%;
+	background: none;
+	cursor: pointer;
+	overflow: hidden;
+}
+
+.trail-color input[type="color"]::-webkit-color-swatch-wrapper {
+	padding: 0;
+}
+
+.trail-color input[type="color"]::-webkit-color-swatch {
+	border: none;
+	border-radius: 50%;
+}
+
+.trail-color input[type="color"]::-moz-color-swatch {
+	border: none;
+	border-radius: 50%;
+}
+
+/* ============================================================
+   SHORTCUT ICONS AND THE "ADD A SHORTCUT" BOX
+   ============================================================ */
+
+.shortcut-wrap {
+	position: relative;
+	animation: fade-up var(--dur-slow) calc(var(--i) * 0.04s) var(--ease-out) both;
+}
+
+.shortcut-wrap .shortcut {
+	animation: none;
+}
+
+/* a site's own icon on a calm glass circle (the letter shows if there's no icon) */
+.shortcut-letter.has-icon {
+	background: rgba(238, 240, 255, 0.08);
+	font-size: 0;
+}
+
+.shortcut-letter img {
+	width: 26px;
+	height: 26px;
+	border-radius: 6px;
+	object-fit: contain;
+}
+
+/* small remove button that appears on hover */
+.shortcut-remove {
+	position: absolute;
+	top: -4px;
+	right: 6px;
+	display: grid;
+	place-items: center;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	border: 1px solid var(--line);
+	border-radius: 50%;
+	background: color-mix(in srgb, var(--void) 90%, transparent);
+	color: rgba(238, 240, 255, 0.75);
+	font-size: 13px;
+	line-height: 1;
+	cursor: pointer;
+	opacity: 0;
+	transform: scale(0.85);
+	transition:
+		opacity 0.15s,
+		transform 0.15s var(--ease-out);
+}
+
+.shortcut-wrap:hover .shortcut-remove,
+.shortcut-remove:focus-visible {
+	opacity: 1;
+	transform: none;
+}
+
+.shortcut-remove:hover {
+	color: var(--starlight);
+	border-color: var(--aurora);
+}
+
+@media (hover: none) {
+	.shortcut-remove {
+		opacity: 0.8;
+		transform: none;
+	}
+}
+
+.mini-dialog {
+	width: min(380px, calc(100vw - 32px));
+	margin-top: 18vh;
+}
+
+.mini-dialog form {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	padding: 22px;
+}
+
+.mini-dialog h2 {
+	margin: 0 0 2px;
+	font-family: "Cormorant Garamond", Georgia, serif;
+	font-style: italic;
+	font-weight: 500;
+	font-size: 26px;
+}
+
+.mini-field {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	font-size: 12.5px;
+	color: rgba(238, 240, 255, 0.65);
+}
+
+.mini-field em {
+	font-style: normal;
+	color: rgba(238, 240, 255, 0.4);
+}
+
+.mini-field input {
+	height: 40px;
+	padding: 0 14px;
+	border: 1px solid rgba(238, 240, 255, 0.12);
+	border-radius: 12px;
+	background: rgba(238, 240, 255, 0.05);
+	color: var(--starlight);
+	font: inherit;
+	font-size: 14px;
+	outline: none;
+	transition: border-color 0.15s;
+}
+
+.mini-field input:focus {
+	border-color: var(--aurora);
+}
+
+.mini-note {
+	min-height: 1em;
+	margin: -4px 0 0;
+	font-size: 12.5px;
+	color: #ff9d9d;
+}
+
+.mini-note:empty {
+	display: none;
+}
+
+.mini-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+}
+
+.mini-actions .pill-btn[type="submit"] {
+	border-color: transparent;
+	background: var(--aurora);
+	color: var(--void);
+	font-weight: 600;
+}
+
+.mini-actions .pill-btn[type="submit"]:hover {
+	filter: brightness(1.08);
+}
+
+.pill-btn.quiet {
+	border-color: transparent;
+	background: none;
+}
+
+/* ============================================================
+   "COULDN'T LOAD" PAGE (shown over a tab whose page failed)
+   ============================================================ */
+
+.page-error {
+	position: absolute;
+	inset: 0;
+	z-index: 2;
+	display: grid;
+	place-items: center;
+	padding: calc(var(--bar-h, 0px) + 24px) 20px 40px;
+	background:
+		radial-gradient(ellipse at 50% 35%, color-mix(in srgb, var(--nebula) 35%, transparent), transparent 60%),
+		var(--void);
+	overflow: auto;
+	animation: fade-in var(--dur-mid) var(--ease-out) both;
+}
+
+.page-error-card {
+	width: min(460px, 100%);
+	text-align: center;
+}
+
+.page-error-art {
+	width: 76px;
+	height: 76px;
+	margin-bottom: 14px;
+	fill: none;
+	stroke: var(--moon-light);
+	stroke-width: 2.2;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+	filter: drop-shadow(0 0 14px color-mix(in srgb, var(--moon-base) 50%, transparent));
+}
+
+.page-error-art .drift {
+	stroke: rgba(238, 240, 255, 0.4);
+	animation: drift 3s ease-in-out infinite alternate;
+}
+
+@keyframes drift {
+	to {
+		transform: translateX(6px);
+	}
+}
+
+.page-error h2 {
+	margin: 0 0 10px;
+	font-family: "Cormorant Garamond", Georgia, serif;
+	font-style: italic;
+	font-weight: 500;
+	font-size: 32px;
+	color: var(--starlight);
+}
+
+.page-error p {
+	margin: 0 0 22px;
+	font-size: 14.5px;
+	line-height: 1.55;
+	color: rgba(238, 240, 255, 0.7);
+}
+
+.page-error-actions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 10px;
+}
+
+.pill-btn.primary {
+	border-color: transparent;
+	background: var(--aurora);
+	color: var(--void);
+	font-weight: 600;
+}
+
+.pill-btn.primary:hover {
+	background: var(--aurora);
+	filter: brightness(1.08);
+}
+
+.page-error-details {
+	margin-top: 26px;
+	font-size: 12.5px;
+	color: rgba(238, 240, 255, 0.45);
+	text-align: left;
+}
+
+.page-error-details summary {
+	width: max-content;
+	margin: 0 auto;
+	cursor: pointer;
+}
+
+.page-error-details pre {
+	max-height: 160px;
+	margin: 10px 0 0;
+	padding: 12px 14px;
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	background: rgba(0, 0, 0, 0.3);
+	overflow: auto;
+	white-space: pre-wrap;
+	word-break: break-word;
+	font-size: 11.5px;
+}
+
+:root[data-motion="reduced"] .page-error-art .drift {
+	animation: none;
+}
+
+/* narrow screens: tabs shrink to little more than their icon, and only the open one has a close button */
+@media (max-width: 480px) {
+	.tab {
+		min-width: 52px;
+		padding-left: 10px;
+	}
+
+	.tab:not(.active) .tab-close {
+		display: none;
+	}
+
+	.tab-icon {
+		margin-right: 7px;
+	}
 }

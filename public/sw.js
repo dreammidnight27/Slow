@@ -4,6 +4,22 @@ importScripts("scram/scramjet.all.js");
 const { ScramjetServiceWorker } = $scramjetLoadWorker();
 const scramjet = new ScramjetServiceWorker();
 
+/* ---------- never let a cookie hold up a page ----------
+   When a site sends a cookie, Scramjet tells the page that asked and waits for the page to
+   answer before handing over the file. Two kinds of page never answer, and the file then
+   never arrives:
+   - Slow's own page (tab and shortcut icons come through the proxy too), which isn't a website;
+   - a website that asked very early, before Scramjet started inside it (browsers fetch
+     stylesheets ahead of running scripts). That left pages like Wikipedia blank.
+   So Slow's own page isn't asked at all, and a website gets a moment to answer. The cookie
+   is kept either way (Scramjet saves it before asking). */
+const tellPage = scramjet.dispatch.bind(scramjet);
+scramjet.dispatch = (client, message) => {
+	const prefix = location.origin + (scramjet.config?.prefix || "/scramjet/");
+	if (!client?.url?.startsWith(prefix)) return Promise.resolve();
+	return Promise.race([tellPage(client, message), new Promise((resolve) => setTimeout(resolve, 1500))]);
+};
+
 /* ---------- keep websites' cookies (logins, preferences, "you passed the CAPTCHA") ----------
    Scramjet 1.1.0 keeps cookies in this worker's memory, and the browser restarts the worker
    often (even after ~30 seconds idle), so they were lost:
@@ -61,10 +77,33 @@ async function handleRequest(event) {
 		if (event.request.method === "HEAD") return headRequest(event);
 		return scramjet.fetch(event);
 	}
+	if (isCover(event.request)) return coverRequest(event.request);
 	const response = await fetch(fresh(event.request));
 	const { mode, destination } = event.request;
 	const needsHeaders = mode === "navigate" || destination === "worker" || destination === "sharedworker";
 	return needsHeaders ? isolated(response) : response;
+}
+
+// Game pictures in the games page are kept for good once downloaded (the page preloads them all).
+// Some hosts tell browsers not to keep them, so Slow keeps them itself.
+const COVER_CACHE = "slow-covers"; // the same name is used in index.js
+const COVER_HOSTS = [
+	"https://raw.githubusercontent.com/gn-math/covers/",
+	"https://selenite.cc/resources/semag/",
+	"https://3kh0.github.io/projects/",
+];
+
+function isCover(request) {
+	return request.method === "GET" && COVER_HOSTS.some((host) => request.url.startsWith(host));
+}
+
+async function coverRequest(request) {
+	const cache = await caches.open(COVER_CACHE);
+	const saved = await cache.match(request.url);
+	if (saved) return saved;
+	const response = await fetch(request);
+	if (response.ok) cache.put(request.url, response.clone()).catch(() => {});
+	return response;
 }
 
 // Slow's own files are always checked with the server (a tiny request when nothing changed),
@@ -119,6 +158,51 @@ const SCRAMJET_SCRIPTS =
 // Slow's per-tab volume control, added right after Scramjet's scripts so it's in place
 // before the page's own scripts make any sound. (A full address, so a page's <base> can't move it.)
 const TAB_VOLUME_SCRIPT = `<script src="${new URL("tab-volume.js", self.location.href).href}"></script>`;
+
+// UGS games are single web pages kept on jsDelivr, which sends them labelled as plain text,
+// so they'd show as code. Scramjet only adapts pages labelled as web pages (before any later
+// hook could relabel them), so Slow fetches these itself and labels them as web pages first.
+const UGS_FILES = "https://cdn.jsdelivr.net/gh/bubbls/ugs-singlefile/UGS-Files/";
+
+// Many UGS Flash games tell the Flash player to load "$1" (a leftover placeholder) instead of the
+// game, and rely on a backup <embed> of the game, which doesn't survive Scramjet. So the player
+// is pointed at the game itself, and the backup is removed.
+function fixUgsFlash(html) {
+	if (!html.includes('player.load("$1")')) return html;
+	const swf = html.match(/<embed[^>]*\ssrc="([^"]+\.swf)"/i)?.[1];
+	if (!swf) return html;
+	return html
+		.replace('player.load("$1")', `player.load(${JSON.stringify(swf)})`)
+		.replace(/<param name="movie"[^>]*>\s*/i, "")
+		.replace(/<embed[^>]*\.swf"[^>]*>/i, "");
+}
+
+scramjet.addEventListener("request", (event) => {
+	if (!event.url.href.startsWith(UGS_FILES)) return;
+	if (event.destination !== "document" && event.destination !== "iframe") return;
+	event.response = (async () => {
+		const res = await scramjet.client.fetch(event.url, {
+			method: "GET",
+			headers: event.requestHeaders,
+			credentials: "omit",
+			redirect: "manual",
+		});
+		const rawHeaders = Object.fromEntries(
+			// (the size changes if the page is fixed below, so that's left out too)
+			Object.entries(res.rawHeaders || {}).filter(
+				([name]) => !["content-type", "content-length"].includes(name.toLowerCase()),
+			),
+		);
+		rawHeaders["content-type"] = "text/html; charset=utf-8";
+		const headers = new Headers();
+		for (const [name, value] of Object.entries(rawHeaders)) {
+			if (typeof value === "string") headers.set(name, value);
+		}
+		const page = new Response(fixUgsFlash(await res.text()), { status: res.status, statusText: res.statusText, headers });
+		page.rawHeaders = rawHeaders;
+		return page;
+	})();
+});
 
 // Any response can set cookies (pages, images, scripts...), so check after each one.
 // Saving only happens when something actually changed.

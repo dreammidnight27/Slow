@@ -56,6 +56,22 @@ Run the server
 pnpm start
 ```
 
+### Use Slow through your own computer (`npm run share`)
+
+Websites load through your computer's internet connection instead of a shared public server. That's what makes YouTube videos play, and sites trust it more.
+
+```
+npm run share
+```
+
+(On Windows you can also double-click `Share Slow.cmd`, or run `node scripts/share.mjs` if PowerShell blocks `npm`.)
+
+It starts Slow's server (if it isn't running) and a free Cloudflare tunnel, then prints private links that work on any device. Keep the window open while you use them; Ctrl+C stops sharing. The links change each time you start it, and anyone with one can browse through your internet connection, so keep them private.
+
+- It needs Cloudflare's `cloudflared` program: put `cloudflared.exe` in a `tools` folder here (not uploaded to GitHub), or install it.
+- From other devices, Slow only answers at a secret address made from the key in `.slow-key` (also not uploaded). Delete that file to make a new key, which stops old links from working.
+- On this computer, http://localhost:8080 keeps working as usual.
+
 Resources for self-hosting:
 
 - https://github.com/nvm-sh/nvm

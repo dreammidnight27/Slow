@@ -9,4 +9,5 @@ Dockerfile
 LICENSE
 README.md
 replit.nix
-.github/
+.github/.slow-key
+tools/

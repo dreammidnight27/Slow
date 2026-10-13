@@ -60,17 +60,6 @@
 							<circle cx="17.8" cy="13.3" r="1.1" fill="currentColor" />
 						</svg>
 					</button>
-					<div id="games-menu" class="games-menu hidden" role="dialog" aria-label="Games">
-						<div class="games-head">
-							<div class="games-views" role="tablist" aria-label="Game lists">
-								<button type="button" role="tab" data-view="popular">Popular</button>
-								<button type="button" role="tab" data-view="gnmath">gn-math</button>
-							</div>
-							<input id="games-filter" type="text" placeholder="Find a game" autocomplete="off" spellcheck="false" aria-label="Find a game" />
-						</div>
-						<div id="games-grid" class="games-grid"></div>
-						<p id="games-note" class="games-note"></p>
-					</div>
 				</div>
 
 				<div class="toolbar">
@@ -179,6 +168,7 @@
 							placeholder="Search or enter an address"
 							aria-label="Search the web"
 						/>
+						<div id="home-suggest" class="suggest hidden" role="listbox"></div>
 					</form>
 
 					<div class="quick">
@@ -190,6 +180,26 @@
 				<footer class="home-footer">
 						Powered by Scramjet &nbsp;|&nbsp; <a href="credits.html">Credits</a>
 					</footer>
+				</section>
+
+				<!-- Shown over a tab whose page couldn't load -->
+				<section id="page-error" class="page-error hidden" role="alert" aria-labelledby="page-error-title">
+					<div class="page-error-card">
+						<svg class="page-error-art" viewBox="0 0 64 64" aria-hidden="true">
+							<path d="M41 10a22 22 0 1 0 13 39A18 18 0 0 1 41 10Z" />
+							<path class="drift" d="M8 50h14M14 56h14" />
+						</svg>
+						<h2 id="page-error-title">Couldn't reach this site</h2>
+						<p id="page-error-text"></p>
+						<div class="page-error-actions">
+							<button type="button" class="pill-btn primary" id="page-error-retry">Try again</button>
+							<button type="button" class="pill-btn" id="page-error-search">Search for it</button>
+						</div>
+						<details class="page-error-details">
+							<summary>Details</summary>
+							<pre id="page-error-code"></pre>
+						</details>
+					</div>
 				</section>
 			</main>
 		</div>
@@ -238,6 +248,25 @@
 			<p id="notice-text"></p>
 			<div id="notice-actions" class="notice-actions"></div>
 		</div>
+
+		<dialog id="shortcut-dialog" class="palette mini-dialog" aria-labelledby="shortcut-dialog-title">
+			<form id="shortcut-form" novalidate>
+				<h2 id="shortcut-dialog-title">Add a shortcut</h2>
+				<label class="mini-field">
+					<span>Address</span>
+					<input id="shortcut-url" type="text" autocomplete="off" spellcheck="false" placeholder="example.com" />
+				</label>
+				<label class="mini-field">
+					<span>Name <em>(optional)</em></span>
+					<input id="shortcut-name" type="text" autocomplete="off" maxlength="40" placeholder="Shown under the icon" />
+				</label>
+				<p id="shortcut-note" class="mini-note" role="alert"></p>
+				<div class="mini-actions">
+					<button type="button" class="pill-btn quiet" id="shortcut-cancel">Cancel</button>
+					<button type="submit" class="pill-btn">Add</button>
+				</div>
+			</form>
+		</dialog>
 
 		<dialog id="settings" class="settings" aria-labelledby="settings-title">
 			<form id="settings-form" method="dialog">
@@ -296,6 +325,13 @@
 							</span>
 							<input type="checkbox" role="switch" name="dedupeTabs" />
 						</label>
+						<label class="setting">
+							<span class="setting-text">
+								<span class="setting-name">Rest tabs you aren't using</span>
+								<span class="setting-hint">After 30 minutes in the background, a tab that isn't playing sound lets go of its memory. It loads again when you open it.</span>
+							</span>
+							<input type="checkbox" role="switch" name="sleepTabs" />
+						</label>
 					</section>
 
 					<section>
@@ -335,10 +371,17 @@
 						</label>
 						<label class="setting">
 							<span class="setting-text">
-								<span class="setting-name">Address bar suggestions</span>
-								<span class="setting-hint">Suggests sites from your history as you type.</span>
+								<span class="setting-name">Suggestions</span>
+								<span class="setting-hint">Shows sites from your history and open tabs as you type.</span>
 							</span>
 							<input type="checkbox" role="switch" name="suggestions" />
+						</label>
+						<label class="setting">
+							<span class="setting-text">
+								<span class="setting-name">Search suggestions</span>
+								<span class="setting-hint">Adds your search engine's suggestions. What you type is sent to it (through Slow) as you type.</span>
+							</span>
+							<input type="checkbox" role="switch" name="searchSuggestions" />
 						</label>
 						<label class="setting">
 							<span class="setting-text">
@@ -372,6 +415,32 @@
 							</span>
 							<input type="checkbox" role="switch" name="stars" />
 						</label>
+						<label class="setting">
+							<span class="setting-text">
+								<span class="setting-name">Cursor trail</span>
+								<span class="setting-hint">A little effect that follows your mouse, in your theme's colors. Works over websites too.</span>
+							</span>
+							<select name="cursorTrail">
+								<option value="off">Off</option>
+								<option value="stardust">Stardust</option>
+								<option value="comet">Comet</option>
+								<option value="glow">Glow</option>
+							</select>
+						</label>
+						<div class="setting">
+							<span class="setting-text">
+								<label class="setting-name" for="set-trail-mode">Trail color</label>
+								<span class="setting-hint">Match your theme, pick your own, or let it cycle through a rainbow.</span>
+							</span>
+							<div class="trail-color">
+								<select id="set-trail-mode" name="trailColorMode">
+									<option value="theme">Match theme</option>
+									<option value="custom">Custom</option>
+									<option value="rainbow">Rainbow</option>
+								</select>
+								<input id="set-trail-color" type="color" name="trailColor" aria-label="Custom trail color" />
+							</div>
+						</div>
 					</section>
 
 					<section>
@@ -425,6 +494,25 @@
 				</div>
 			</form>
 		</dialog>
+
+		<div id="games-menu" class="games-menu hidden" role="dialog" aria-modal="true" aria-labelledby="games-title">
+			<div class="games-page">
+				<header class="games-top">
+					<h2 id="games-title">Games <span id="games-total" class="games-total"></span></h2>
+					<button id="games-close" class="icon-btn" type="button" aria-label="Close games">&times;</button>
+				</header>
+				<div class="games-head">
+					<div class="games-views" role="tablist" aria-label="Game lists"></div>
+					<div class="games-search">
+						<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg>
+						<input id="games-filter" type="search" placeholder="Find a game" autocomplete="off" spellcheck="false" aria-label="Find a game" />
+						<button id="games-clear" type="button" aria-label="Clear search" hidden>&times;</button>
+					</div>
+				</div>
+				<div id="games-grid" class="games-grid"></div>
+				<p id="games-note" class="games-note"></p>
+			</div>
+		</div>
 
 		<div id="theme-flash" aria-hidden="true"></div>
 		<div id="toast" class="hidden" role="alert">

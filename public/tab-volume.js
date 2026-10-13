@@ -96,7 +96,7 @@
 
 	/* ---------- keep everything at the tab's volume ---------- */
 
-	function applyAll() {
+	function applyHere() {
 		const l = level();
 		for (const gain of gains) {
 			if (Math.abs(gain.gain.value - l) > 0.001) gain.gain.value = l;
@@ -105,6 +105,31 @@
 		for (const el of media) apply(el);
 	}
 
+	// Called by Slow when the volume changes: this page, then frames inside it (games often run in one).
+	function applyAll() {
+		applyHere();
+		for (let i = 0; i < window.frames.length; i++) {
+			try {
+				window.frames[i].__slowApplyVolume?.();
+			} catch {}
+		}
+	}
+
 	window.__slowApplyVolume = applyAll;
-	setInterval(applyAll, 300);
+
+	// Asked by Slow before it rests a tab you haven't used in a while: tabs making sound
+	// (music, videos, games) are never put to sleep.
+	window.__slowPlaying = () => {
+		for (const el of media) if (!el.paused && !el.ended && !el.muted) return true;
+		for (const gain of gains) if (gain.context.state === "running") return true;
+		for (let i = 0; i < window.frames.length; i++) {
+			try {
+				if (window.frames[i].__slowPlaying?.()) return true;
+			} catch {}
+		}
+		return false;
+	};
+
+	// Slow also calls this right away whenever the volume changes; this catches new sounds.
+	setInterval(applyHere, 1000);
 })();

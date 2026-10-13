@@ -3,3 +3,7 @@ node_modules
 scramjet/
 dist/
 public/.claude/
+
+# your private key for sharing Slow (npm run share), and the tunnel program
+.slow-key
+tools/

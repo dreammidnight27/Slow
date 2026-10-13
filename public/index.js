@@ -6,7 +6,9 @@
 
 // Where typed searches can go. %s is replaced by what you typed.
 const SEARCH_ENGINES = {
-	google: { name: "Google", url: "https://www.google.com/search?q=%s" },
+	// "udm=14" is Google's plain "Web" results. Its full results page has scripts (like the
+	// AI Overview's) that the proxy can't adapt yet, which leaves gaps and overlapping text.
+	google: { name: "Google", url: "https://www.google.com/search?q=%s&udm=14" },
 	duckduckgo: { name: "DuckDuckGo", url: "https://duckduckgo.com/?q=%s" },
 	bing: { name: "Bing", url: "https://www.bing.com/search?q=%s" },
 	brave: { name: "Brave Search", url: "https://search.brave.com/search?q=%s" },
@@ -26,12 +28,15 @@ const DEFAULT_SETTINGS = {
 	showShortcuts: true,
 	history: true,
 	suggestions: true,
+	searchSuggestions: true,
 	warnOnLeave: false,
 	// Follows the system's "reduce motion" setting until changed here.
 	reduceMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
 	stars: true,
 	restoreTabs: true,
 	dedupeTabs: true,
+	// Tabs left in the background for a long time (and not making sound) let go of their memory.
+	sleepTabs: true,
 	// Minutes between break reminders; 0 turns them off.
 	breakMinutes: 0,
 	// Darken bright websites, except the sites listed in darkSkip.
@@ -39,6 +44,11 @@ const DEFAULT_SETTINGS = {
 	darkSkip: [],
 	// Which hover sound to play ("off" for none).
 	hoverSound: "click",
+	// "off", "stardust", "comet" or "glow"
+	cursorTrail: "off",
+	// "theme", "custom" (uses trailColor) or "rainbow"
+	trailColorMode: "theme",
+	trailColor: "#ff7ad9",
 	soundVolume: 0.6,
 	// Empty means the wisp server built into this app.
 	wispUrl: "",
@@ -223,6 +233,7 @@ const scramjetInit = Promise.resolve(scramjet.init());
 // resolve the short path against another site and lose their connection.
 const connection = new BareMux.BareMuxConnection(new URL(BASE + "baremux/worker.js", location.origin).href);
 const TRANSPORT = BASE + "libcurl/index.mjs";
+let transportUrl = TRANSPORT; // changes when Slow reconnects with a fresh copy (see reconnect())
 
 // Registers the service worker and connects to the wisp server.
 // It runs the first time you load a page, and again after the wisp server is changed in settings.
@@ -237,9 +248,9 @@ function ensureReady() {
 			const wispUrl = settings.wispUrl || defaultWispUrl();
 			if (
 				connectedWisp !== wispUrl ||
-				(await connection.getTransport()) !== TRANSPORT
+				(await connection.getTransport()) !== transportUrl
 			) {
-				await connection.setTransport(TRANSPORT, [
+				await connection.setTransport(transportUrl, [
 					{ websocket: wispUrl },
 				]);
 				connectedWisp = wispUrl;
@@ -250,6 +261,102 @@ function ensureReady() {
 		});
 	}
 	return readyPromise;
+}
+
+/* ---------- reconnect when the connection wears out ----------
+   After many sites, libcurl (what Slow uses to reach the wisp server) can get stuck failing
+   every secure site with an SSL error, until the page is reloaded. Reconnecting with the same
+   copy keeps the stuck state, so Slow loads a fresh copy of it instead, then loads the page again
+   (once, so a site that's really broken isn't retried forever). */
+
+const WORN_CONNECTION = /error code (35|60)\b|SSL connect error|SSL peer certificate/;
+let reconnecting = null;
+
+// Slow's own way to fetch through the proxy (search suggestions use it too).
+let proxyClient = null;
+function proxyFetch(url) {
+	proxyClient ||= new BareMux.BareClient(new URL(BASE + "baremux/worker.js", location.origin).href);
+	return proxyClient.fetch(url);
+}
+
+// Checks the connection with a tiny, always-there address.
+async function connectionWorks() {
+	try {
+		const res = await Promise.race([
+			proxyFetch("https://www.gstatic.com/generate_204"),
+			new Promise((resolve) => setTimeout(resolve, 6000)),
+		]);
+		return res?.status === 204;
+	} catch {
+		return false;
+	}
+}
+
+function reconnect() {
+	if (!reconnecting) {
+		const wispUrl = settings.wispUrl || defaultWispUrl();
+		transportUrl = `${TRANSPORT}?fresh=${Date.now()}`;
+		reconnecting = connection
+			.setTransport(transportUrl, [{ websocket: wispUrl }])
+			.then(() => (connectedWisp = wispUrl))
+			// Tabs that failed at the same moment share this one reconnect.
+			.finally(() => setTimeout(() => (reconnecting = null), 3000));
+	}
+	return reconnecting;
+}
+
+async function recoverConnection(tab) {
+	let message = "";
+	try {
+		const doc = tab.frame.frame.contentDocument;
+		if (doc?.title !== "Scramjet") return; // Scramjet's own error page
+		const details = doc.querySelector("textarea, pre");
+		message = details?.value || details?.textContent || "";
+	} catch {
+		return;
+	}
+	if (!WORN_CONNECTION.test(message)) return;
+	if (performance.now() - (tab.reconnectedAt || -Infinity) < 20000) return;
+	tab.reconnectedAt = performance.now();
+	// The same error also means "that site doesn't exist or won't answer". Only reconnect if
+	// the connection itself has stopped working; otherwise the site is the problem.
+	if (await connectionWorks()) return;
+	try {
+		await reconnect();
+	} catch {
+		return;
+	}
+	if (tab.frame && tab.url) {
+		startLoading(tab);
+		tab.frame.go(tab.url);
+	}
+}
+
+// A page whose files stopped arriving (still "loading" long after it started, usually blank).
+// The first time, just load it again; if it gets stuck again, use a fresh connection too.
+async function recoverStall(tab) {
+	if (!tab.frame || !tab.loading || !tab.url) return;
+	try {
+		const doc = tab.frame.frame.contentDocument;
+		if (doc && doc.readyState !== "loading") return;
+	} catch {
+		return;
+	}
+	if (tab.stallUrl !== tab.url) {
+		tab.stallUrl = tab.url;
+		tab.stalls = 0;
+	}
+	tab.stalls++;
+	if (tab.stalls > 2) return; // it really is broken; leave it be
+	if (tab.stalls === 2) {
+		try {
+			await reconnect();
+		} catch {}
+	}
+	if (tab.frame && tab.url) {
+		startLoading(tab);
+		tab.frame.go(tab.url);
+	}
 }
 
 /* ============================================================
@@ -314,6 +421,7 @@ function newTab() {
 		volume: 1, // 0 to 1, set from the tab's right-click menu
 		muted: false,
 		soundEl: null,
+		icon: null,
 	};
 	tabs.push(tab);
 	activate(tab.id);
@@ -321,8 +429,12 @@ function newTab() {
 }
 
 function activate(id) {
+	// The tab you were on was last seen now (used to rest tabs you leave for a long time).
+	const left = activeTab();
+	if (left) left.seenAt = Date.now();
 	activeId = id;
 	const tab = activeTab();
+	tab.seenAt = Date.now();
 
 	// A restored tab wakes up (loads its page) the first time you open it.
 	if (tab.pendingUrl) {
@@ -342,6 +454,7 @@ function closeTab(id) {
 
 	const [tab] = tabs.splice(index, 1);
 	clearTimeout(tab.loadTimer);
+	clearTimeout(tab.stallTimer);
 
 	// Remember it so it can be brought back with Undo or "Reopen closed tab".
 	const closedUrl = tab.url || tab.pendingUrl;
@@ -388,6 +501,17 @@ function renderTabs() {
 			el.setAttribute("role", "tab");
 			el.tabIndex = 0;
 
+			// The site's icon (a spinner while loading, a globe if the site has none).
+			const icon = document.createElement("span");
+			icon.className = "tab-icon";
+			icon.setAttribute("aria-hidden", "true");
+			const img = document.createElement("img");
+			img.alt = "";
+			img.decoding = "async";
+			img.addEventListener("error", () => icon.classList.add("none"));
+			img.addEventListener("load", () => icon.classList.remove("none"));
+			icon.append(img);
+
 			const sound = document.createElement("span");
 			sound.className = "tab-sound";
 			sound.setAttribute("aria-hidden", "true");
@@ -418,12 +542,24 @@ function renderTabs() {
 				openTabMenu(tab, event.clientX, event.clientY);
 			});
 
-			el.append(sound, title, close);
+			el.append(icon, sound, title, close);
 			tabStrip.append(el);
 			tab.el = el;
 			tab.titleEl = title;
 			tab.soundEl = sound;
+			tab.iconEl = icon;
 		}
+
+		// New tab page: Slow's own moon. A site: its icon (kept while it loads, if it had one).
+		const site = tab.frame || tab.pendingUrl;
+		const src = site ? tab.icon || "" : BASE + "favicon.svg";
+		const img = tab.iconEl.firstChild;
+		if (img.getAttribute("src") !== src) {
+			tab.iconEl.classList.toggle("none", !src);
+			if (src) img.src = src;
+			else img.removeAttribute("src");
+		}
+		tab.iconEl.classList.toggle("spin", tab.loading);
 
 		tab.el.classList.toggle("active", tab.id === activeId);
 		tab.el.classList.toggle("loading", tab.loading);
@@ -483,6 +619,7 @@ function updateView() {
 	// it to the quicker comeback fade then, while the page is hidden, means nothing visibly
 	// changes. (Switching while it's on screen made the title flicker and the logo twitch.)
 	if (showingFrame) home.classList.remove("intro");
+	else window.__slowStarfield?.(); // the sky is visible again
 
 	const target = showingFrame ? current.frame.frame : home;
 	if (target !== lastShown) {
@@ -496,9 +633,58 @@ function updateView() {
 		barKey = key;
 	}
 
-	address.value = current ? current.url : "";
+	renderPageError(showingFrame && current.error != null && !current.loading ? current : null);
+
+	// Never overwrite what you're in the middle of typing.
+	if (document.activeElement !== address) address.value = current ? current.url : "";
 	document.title = showingFrame ? `${current.title} | Slow` : "Slow";
 }
+
+/* ---------- "couldn't load" page ---------- */
+
+const pageError = document.getElementById("page-error");
+const pageErrorText = document.getElementById("page-error-text");
+const pageErrorCode = document.getElementById("page-error-code");
+
+// What went wrong, in plain words (from the proxy's technical message).
+function explainLoadError(message) {
+	if (/error code 6\b|resolve host/i.test(message)) {
+		return "That address doesn't seem to exist. Check it for typos.";
+	}
+	if (/error code 28\b|timed out/i.test(message)) {
+		return "The site took too long to answer. It may be busy or down right now.";
+	}
+	if (/error code (7|35|56|60)\b|SSL|connect/i.test(message)) {
+		return "The site didn't answer. It may be down, the address may be mistyped, or the proxy server may not be allowed to reach it.";
+	}
+	return "Something went wrong while loading the page.";
+}
+
+// Shows the page for `tab` (or hides it for null).
+function renderPageError(tab) {
+	pageError.classList.toggle("hidden", !tab);
+	if (!tab) return;
+	document.getElementById("page-error-title").textContent = `Couldn't reach ${hostOf(tab.url)}`;
+	pageErrorText.textContent = explainLoadError(tab.error);
+	pageErrorCode.textContent = tab.error.split("\n\nStack:")[0].trim();
+}
+
+document.getElementById("page-error-retry").addEventListener("click", () => {
+	const tab = activeTab();
+	if (!tab?.frame || !tab.url) return;
+	tab.error = null;
+	tab.stalls = 0;
+	startLoading(tab);
+	tab.frame.go(tab.url);
+	renderTabs();
+	updateView();
+});
+
+document.getElementById("page-error-search").addEventListener("click", () => {
+	const tab = activeTab();
+	if (!tab?.url) return;
+	navigate(tab, searchTemplate().replace("%s", encodeURIComponent(hostOf(tab.url))), { here: true });
+});
 
 /* ============================================================
    NAVIGATION
@@ -508,12 +694,16 @@ function startLoading(tab) {
 	tab.loading = true;
 	tab.loadStart = performance.now();
 	clearTimeout(tab.loadTimer);
-	// Safety net: never show the loading bar for more than 15 seconds.
-	tab.loadTimer = setTimeout(() => finishLoading(tab), 15000);
+	clearTimeout(tab.stallTimer);
+	// A page whose files stop arriving stays blank. If it's still stuck after a while, retry it.
+	tab.stallTimer = setTimeout(() => recoverStall(tab), 12000);
+	// Safety net: never show the loading bar for more than 20 seconds.
+	tab.loadTimer = setTimeout(() => finishLoading(tab), 20000);
 }
 
 function finishLoading(tab) {
 	clearTimeout(tab.loadTimer);
+	clearTimeout(tab.stallTimer);
 	if (!tab.loading) return;
 	tab.loading = false;
 	renderTabs();
@@ -558,11 +748,13 @@ async function navigate(tab, input, options = {}) {
 			if (performance.now() - tab.loadStart > 250) finishLoading(tab);
 			applyPageDarkMode(tab);
 			applyPageLayout(tab);
+			recoverConnection(tab);
 		});
 	}
 
 	tab.url = url;
 	tab.title = hostOf(url);
+	tab.error = null;
 	recordVisit(url, tab.title);
 	startLoading(tab);
 	tab.frame.go(url);
@@ -580,8 +772,11 @@ function goHome(tab) {
 	}
 	tab.loading = false;
 	clearTimeout(tab.loadTimer);
+	clearTimeout(tab.stallTimer);
 	tab.url = "";
 	tab.title = "New tab";
+	tab.icon = null;
+	tab.error = null;
 	renderTabs();
 	updateView();
 	homeSearch.value = "";
@@ -653,55 +848,88 @@ reloadBtn.addEventListener("click", () => {
 
 addressForm.addEventListener("submit", (event) => {
 	event.preventDefault();
+	hideSuggest();
+	address.blur();
 	navigate(activeTab(), address.value);
 });
 
 homeForm.addEventListener("submit", (event) => {
 	event.preventDefault();
+	hideSuggest();
+	homeSearch.blur();
 	navigate(activeTab(), homeSearch.value);
 	homeSearch.value = "";
 });
 
-// Best effort: keep the address bar and tab name in sync when you click
-// links inside a page. If Scramjet doesn't expose the current URL, this
-// quietly does nothing.
-setInterval(() => {
-	const tab = activeTab();
-	if (!tab || !tab.frame) return;
+/* ---------- keep each tab's address, name and icon up to date ----------
+   Clicking links inside a page changes its address, and pages set their own titles and icons. */
 
-	let current = null;
+// The page's own icon (shown through the proxy), or the site's /favicon.ico if it names none.
+function pageIcon(doc, pageUrl) {
+	const links = [...doc.querySelectorAll('link[rel~="icon" i], link[rel="apple-touch-icon" i]')];
+	const link = links.find((l) => /(^|\s)icon(\s|$)/i.test(l.rel)) || links[0];
 	try {
-		const raw = tab.frame.url;
-		current = raw ? String(raw) : null;
-	} catch {}
-
-	if (
-		current &&
-		/^https?:\/\//.test(current) &&
-		!current.startsWith(location.origin) &&
-		current !== tab.url
-	) {
-		tab.url = current;
-		tab.title = hostOf(current);
-		recordVisit(current, tab.title);
-		if (document.activeElement !== address) address.value = current;
-		renderTabs();
-		updateView();
+		const href = link?.href; // the page's own address for it (Scramjet shows the original)
+		if (href?.startsWith("data:")) return href;
+		return scramjet.encodeUrl(new URL(href || "/favicon.ico", pageUrl).href);
+	} catch {
+		return null;
 	}
-}, 700);
+}
 
-// Name each tab after its page's own title (like "Retro Bowl") once the page has one.
+// History shows each page's real name once it's known (it starts as just the site's address).
+function nameVisit(url, title) {
+	const item = recent.find((v) => v.url === url);
+	if (item && item.title !== title) {
+		item.title = title;
+		writeList(RECENT_KEY, recent);
+	}
+}
+
 setInterval(() => {
 	let changed = false;
 	for (const tab of tabs) {
 		if (!tab.frame || !tab.url) continue;
-		let title = "";
+
+		// (Not while a page is loading: until the new page arrives, the frame still reports the old one.)
+		let current = null;
 		try {
-			title = (tab.frame.frame.contentDocument?.title || "").trim();
+			const raw = tab.loading ? null : tab.frame.url;
+			current = raw ? String(raw) : null;
 		} catch {}
+		if (current && /^https?:\/\//.test(current) && !current.startsWith(location.origin) && current !== tab.url) {
+			tab.url = current;
+			tab.title = hostOf(current);
+			recordVisit(current, tab.title);
+			changed = true;
+		}
+
+		let doc;
+		try {
+			doc = tab.frame.frame.contentDocument;
+		} catch {}
+		if (!doc?.documentElement) continue;
+
+		let title = (doc.title || "").trim();
+		const details = title === "Scramjet" ? doc.querySelector("textarea, pre") : null;
+		const failed = Boolean(details);
+		if (failed) title = `Couldn't load ${hostOf(tab.url)}`;
+		// Slow shows its own "couldn't load" page over Scramjet's technical one.
+		const error = failed ? details.value || details.textContent || "" : null;
+		if (error !== (tab.error ?? null)) {
+			tab.error = error;
+			changed = true;
+		}
 		if (title.length > 60) title = title.slice(0, 57) + "…";
 		if (title && title !== tab.title) {
 			tab.title = title;
+			if (!failed) nameVisit(tab.url, title);
+			changed = true;
+		}
+
+		const icon = failed ? null : pageIcon(doc, tab.url);
+		if (icon !== tab.icon && doc.readyState !== "loading") {
+			tab.icon = icon;
 			changed = true;
 		}
 	}
@@ -709,7 +937,7 @@ setInterval(() => {
 		renderTabs();
 		updateView();
 	}
-}, 1000);
+}, 700);
 
 
 /* ============================================================
@@ -743,7 +971,8 @@ function writeList(key, list) {
 }
 
 let recent = readList(RECENT_KEY);
-let shortcuts = readList(SHORTCUT_KEY);
+// (Older versions saved shortcuts as http:// addresses; https is faster through the proxy.)
+let shortcuts = readList(SHORTCUT_KEY).map((s) => ({ ...s, url: String(s.url).replace(/^http:\/\//, "https://") }));
 
 /* ---------- recent sites ---------- */
 
@@ -764,6 +993,32 @@ function saveShortcuts() {
 	renderShortcuts();
 }
 
+// A site's icon, fetched through the proxy: its large app icon if it has one, else its favicon.
+// If neither loads, the shortcut keeps showing its first letter.
+function showSiteIcon(letterEl, url) {
+	let origin;
+	try {
+		origin = new URL(url).origin;
+	} catch {
+		return;
+	}
+	const sources = ["/apple-touch-icon.png", "/favicon.ico"].map((path) => scramjet.encodeUrl(origin + path));
+	const img = document.createElement("img");
+	img.alt = "";
+	img.decoding = "async";
+	img.addEventListener("load", () => {
+		letterEl.classList.add("has-icon");
+		letterEl.append(img);
+	});
+	img.addEventListener("error", () => {
+		const next = sources.shift();
+		if (next) img.src = next;
+	});
+	ensureReady()
+		.then(() => (img.src = sources.shift()))
+		.catch(() => {});
+}
+
 function renderShortcuts() {
 	shortcutsEl.textContent = "";
 
@@ -772,135 +1027,370 @@ function renderShortcuts() {
 
 	for (let i = 0; i < count; i++) {
 		const item = shortcuts[i];
+		const wrap = document.createElement("div");
+		wrap.className = "shortcut-wrap";
+		wrap.style.setProperty("--i", String(i));
+
 		const btn = document.createElement("button");
 		btn.type = "button";
-		btn.style.setProperty("--i", String(i));
 
 		const letter = document.createElement("span");
 		letter.className = "shortcut-letter";
 
+		const name = document.createElement("span");
+		name.className = "shortcut-name";
+
 		if (item) {
 			btn.className = "shortcut";
-			btn.title = item.url + " (right-click to remove)";
+			btn.title = item.url;
 			btn.setAttribute("aria-label", "Open " + item.title);
 			letter.textContent = (item.title || "?").charAt(0).toUpperCase();
-
-			const name = document.createElement("span");
-			name.className = "shortcut-name";
 			name.textContent = item.title;
-
 			btn.append(letter, name);
 			btn.addEventListener("click", () => navigate(activeTab(), item.url));
 			btn.addEventListener("contextmenu", (event) => {
 				event.preventDefault();
 				removeShortcut(i);
 			});
+			showSiteIcon(letter, item.url);
+
+			const remove = document.createElement("button");
+			remove.type = "button";
+			remove.className = "shortcut-remove";
+			remove.setAttribute("aria-label", `Remove ${item.title}`);
+			remove.title = "Remove";
+			remove.textContent = "×";
+			remove.addEventListener("click", () => removeShortcut(i));
+			wrap.append(btn, remove);
 		} else {
 			btn.className = "shortcut add";
 			btn.setAttribute("aria-label", "Add shortcut");
 			letter.textContent = "+";
-
-			const name = document.createElement("span");
-			name.className = "shortcut-name";
 			name.textContent = "Add";
-
 			btn.append(letter, name);
 			btn.addEventListener("click", addShortcut);
+			wrap.append(btn);
 		}
 
-		shortcutsEl.append(btn);
+		shortcutsEl.append(wrap);
 	}
 }
+
+const shortcutDialog = document.getElementById("shortcut-dialog");
+const shortcutForm = document.getElementById("shortcut-form");
+const shortcutUrl = document.getElementById("shortcut-url");
+const shortcutName = document.getElementById("shortcut-name");
+const shortcutNote = document.getElementById("shortcut-note");
 
 function addShortcut() {
 	if (shortcuts.length >= SHORTCUT_SLOTS) {
-		showError(
-			`You can have up to ${SHORTCUT_SLOTS} shortcuts. Right-click one to remove it.`,
-		);
+		notify(`You can have up to ${SHORTCUT_SLOTS} shortcuts. Remove one to add another.`);
 		return;
 	}
-
-	const input = window.prompt("Website address for this shortcut, like example.com:");
-	if (!input || !input.trim()) return;
-
-	if (!input.includes(".")) {
-		showError("Type a full address like example.com.");
-		return;
-	}
-
-	const url = search(input.trim(), searchTemplate());
-	shortcuts.push({ url, title: hostOf(url) });
-	saveShortcuts();
+	shortcutForm.reset();
+	shortcutNote.textContent = "";
+	shortcutDialog.showModal();
+	raiseTrail();
+	shortcutUrl.focus();
 }
+
+shortcutForm.addEventListener("submit", (event) => {
+	event.preventDefault();
+	const typed = shortcutUrl.value.trim();
+	const url = typed && search(typed, searchTemplate());
+	// Only real addresses (something with a dot, that isn't turned into a search).
+	if (!typed || !typed.includes(".") || /\s/.test(typed) || url === searchTemplate().replace("%s", encodeURIComponent(typed))) {
+		shortcutNote.textContent = "Type a web address, like example.com.";
+		shortcutUrl.focus();
+		return;
+	}
+	shortcuts.push({ url, title: shortcutName.value.trim() || hostOf(url) });
+	saveShortcuts();
+	shortcutDialog.close();
+});
+
+document.getElementById("shortcut-cancel").addEventListener("click", () => shortcutDialog.close());
+shortcutDialog.addEventListener("click", (event) => {
+	if (event.target === shortcutDialog) shortcutDialog.close();
+});
+shortcutUrl.addEventListener("input", () => (shortcutNote.textContent = ""));
 
 function removeShortcut(index) {
-	shortcuts.splice(index, 1);
+	const [removed] = shortcuts.splice(index, 1);
+	if (!removed) return;
 	saveShortcuts();
+	notify(
+		`Removed ${removed.title}`,
+		[
+			{
+				label: "Undo",
+				run: () => {
+					shortcuts.splice(Math.min(index, shortcuts.length), 0, removed);
+					saveShortcuts();
+				},
+			},
+		],
+		6000,
+	);
 }
 
-/* ---------- address bar suggestions ---------- */
+/* ---------- suggestions (address bar and the new tab page's search) ----------
+   As you type: what Enter will do, open tabs and history that match, then your search
+   engine's suggestions. Up/Down picks one (previewing it in the box), Enter goes,
+   Escape puts back what you typed, then closes. */
 
-function renderSuggest() {
-	if (!settings.suggestions || document.activeElement !== address) {
-		hideSuggest();
+// Each engine's suggestion feed. They all answer [query, [suggestion, ...]].
+const SUGGEST_FEEDS = {
+	google: "https://suggestqueries.google.com/complete/search?client=firefox&q=",
+	duckduckgo: "https://duckduckgo.com/ac/?type=list&q=",
+	bing: "https://api.bing.com/osjson.aspx?query=",
+	brave: "https://search.brave.com/api/suggest?q=",
+	startpage: "https://duckduckgo.com/ac/?type=list&q=", // Startpage has no public feed
+};
+
+// Asked through Slow's own connection, like your browsing (and other sites' rules about
+// what a page may fetch don't get in the way).
+const suggestCache = new Map();
+
+async function webSuggestions(query) {
+	const feed = SUGGEST_FEEDS[settings.searchEngine] || SUGGEST_FEEDS.google;
+	const key = feed + query.toLowerCase();
+	if (suggestCache.has(key)) return suggestCache.get(key);
+	await ensureReady();
+	let data;
+	for (let attempt = 0; attempt < 2 && !data; attempt++) {
+		try {
+			const res = await proxyFetch(feed + encodeURIComponent(query));
+			data = await res.json();
+		} catch {
+			// The connection may still be starting; one more try.
+			await new Promise((r) => setTimeout(r, 300));
+		}
+	}
+	const list = (Array.isArray(data?.[1]) ? data[1] : []).filter((s) => typeof s === "string");
+	suggestCache.set(key, list);
+	if (suggestCache.size > 200) suggestCache.delete(suggestCache.keys().next().value);
+	return list;
+}
+
+const SUGGEST_ICONS = {
+	search: '<circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" />',
+	go: '<path d="M5 12h14M13 6l6 6-6 6" />',
+	history: '<circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" />',
+	tab: '<rect x="3.5" y="6" width="17" height="13" rx="2" /><path d="M3.5 10h17" />',
+};
+
+// Shows `text` with the part matching `query` set apart, safely (no HTML from outside).
+function markMatch(el, text, query, { completion = false } = {}) {
+	const at = query ? text.toLowerCase().indexOf(query.toLowerCase()) : -1;
+	if (at === -1) {
+		el.textContent = text;
 		return;
 	}
+	const strong = document.createElement("b");
+	if (completion && at === 0) {
+		// Like most browsers: what you typed stays plain, the rest of the suggestion is bold.
+		strong.textContent = text.slice(query.length);
+		el.append(text.slice(0, query.length), strong);
+	} else {
+		strong.textContent = text.slice(at, at + query.length);
+		el.append(text.slice(0, at), strong, text.slice(at + query.length));
+	}
+}
 
-	const query = address.value.trim().toLowerCase();
-	const matches = recent
-		.filter(
-			(item) =>
-				!query ||
-				item.url.toLowerCase().includes(query) ||
-				item.title.toLowerCase().includes(query),
-		)
-		.slice(0, 6);
+function attachSuggest(input, box, { showRecentWhenEmpty }) {
+	let items = [];
+	let selected = -1;
+	let typed = ""; // what you actually typed (the box can show a previewed suggestion instead)
+	let request = 0;
 
-	suggestEl.textContent = "";
-	if (matches.length === 0) {
-		hideSuggest();
-		return;
+	function close() {
+		box.classList.add("hidden");
+		box.textContent = "";
+		items = [];
+		selected = -1;
+		input.setAttribute("aria-expanded", "false");
 	}
 
-	for (const item of matches) {
-		const btn = document.createElement("button");
-		btn.type = "button";
-		btn.className = "suggest-item";
+	function go(target) {
+		close();
+		input.blur();
+		navigate(activeTab(), target);
+		if (input === homeSearch) homeSearch.value = "";
+	}
 
-		const title = document.createElement("span");
-		title.className = "item-title";
-		title.textContent = item.title;
+	function baseItems(query) {
+		const list = [];
+		const q = query.toLowerCase();
+		if (query) {
+			const target = search(query, searchTemplate());
+			const isSearch = target === searchTemplate().replace("%s", encodeURIComponent(query));
+			const engine = (SEARCH_ENGINES[settings.searchEngine] || SEARCH_ENGINES.google).name;
+			list.push(
+				isSearch
+					? { icon: "search", text: query, detail: `${engine} search`, fill: query, run: () => go(query), completion: true }
+					: { icon: "go", text: hostOf(target), detail: target, fill: query, run: () => go(query) },
+			);
+		}
+		if (!settings.suggestions) return list;
 
-		const url = document.createElement("span");
-		url.className = "item-url";
-		url.textContent = item.url;
+		const current = activeTab();
+		// (a tab restored from last time keeps its address in pendingUrl until it's opened)
+		const tabUrl = (t) => t.url || t.pendingUrl || "";
+		const openTabs = query
+			? tabs.filter(
+					(t) =>
+						t !== current &&
+						tabUrl(t) &&
+						(tabUrl(t).toLowerCase().includes(q) || (t.title || "").toLowerCase().includes(q)),
+				)
+			: [];
+		for (const t of openTabs.slice(0, 2)) {
+			list.push({
+				icon: "tab",
+				text: t.title || hostOf(tabUrl(t)),
+				detail: "Switch to this tab",
+				fill: tabUrl(t),
+				run: () => {
+					close();
+					input.blur();
+					activate(t.id);
+				},
+			});
+		}
 
-		btn.append(title, url);
-		// mousedown (not click) so the address bar keeps focus until we navigate
-		btn.addEventListener("mousedown", (event) => {
-			event.preventDefault();
-			hideSuggest();
-			navigate(activeTab(), item.url);
+		if (query || showRecentWhenEmpty) {
+			const visits = recent
+				.filter((v) => !query || v.url.toLowerCase().includes(q) || (v.title || "").toLowerCase().includes(q))
+				.filter((v) => !openTabs.some((t) => tabUrl(t) === v.url))
+				.slice(0, query ? 3 : 6);
+			for (const v of visits) {
+				list.push({ icon: "history", text: v.title || hostOf(v.url), detail: v.url, fill: v.url, run: () => go(v.url) });
+			}
+		}
+		return list;
+	}
+
+	function draw() {
+		box.textContent = "";
+		if (!items.length) {
+			close();
+			return;
+		}
+		items.forEach((item, i) => {
+			const row = document.createElement("div");
+			row.className = "suggest-item";
+			row.setAttribute("role", "option");
+			row.setAttribute("aria-selected", String(i === selected));
+
+			const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+			icon.setAttribute("viewBox", "0 0 24 24");
+			icon.setAttribute("class", "ico suggest-icon");
+			icon.setAttribute("aria-hidden", "true");
+			icon.innerHTML = SUGGEST_ICONS[item.icon];
+
+			const text = document.createElement("span");
+			text.className = "item-title";
+			markMatch(text, item.text, typed.trim(), { completion: item.completion });
+
+			row.append(icon, text);
+			if (item.detail) {
+				const detail = document.createElement("span");
+				detail.className = "item-url";
+				detail.textContent = item.detail;
+				row.append(detail);
+			}
+			// mousedown (not click) so the box keeps focus until something happens
+			row.addEventListener("mousedown", (event) => {
+				event.preventDefault();
+				item.run();
+			});
+			row.addEventListener("mousemove", () => {
+				if (selected !== i) {
+					selected = i;
+					for (const [j, el] of [...box.children].entries()) el.setAttribute("aria-selected", String(j === i));
+				}
+			});
+			box.append(row);
 		});
-		suggestEl.append(btn);
+		box.classList.remove("hidden");
+		input.setAttribute("aria-expanded", "true");
 	}
 
-	suggestEl.classList.remove("hidden");
+	async function update() {
+		typed = input.value;
+		selected = -1;
+		const query = typed.trim();
+		const id = ++request;
+		items = baseItems(query);
+		draw();
+
+		// The search engine's ideas join in a moment later (skipped for addresses).
+		if (!query || !settings.searchSuggestions || /^[a-z]+:\/\//i.test(query)) return;
+		await new Promise((r) => setTimeout(r, 120)); // wait for a pause in typing
+		if (id !== request) return;
+		let ideas = [];
+		try {
+			ideas = await webSuggestions(query);
+		} catch {}
+		if (id !== request || document.activeElement !== input) return;
+		const shown = new Set(items.map((i) => i.text.toLowerCase()));
+		for (const idea of ideas) {
+			if (shown.has(idea.toLowerCase())) continue;
+			shown.add(idea.toLowerCase());
+			items.push({ icon: "search", text: idea, fill: idea, run: () => go(idea), completion: true });
+			if (items.length >= 9) break;
+		}
+		draw();
+	}
+
+	function move(step) {
+		if (!items.length) return;
+		selected += step;
+		if (selected < -1) selected = items.length - 1;
+		if (selected >= items.length) selected = -1;
+		// Previews the choice in the box; back at the top shows what you typed.
+		input.value = selected === -1 ? typed : items[selected].fill;
+		for (const [j, el] of [...box.children].entries()) el.setAttribute("aria-selected", String(j === selected));
+	}
+
+	input.setAttribute("aria-autocomplete", "list");
+	input.setAttribute("aria-expanded", "false");
+	input.addEventListener("input", update);
+	input.addEventListener("focus", () => {
+		// Clicking into the address bar selects it all, ready to type over.
+		if (input === address) input.select();
+		if (showRecentWhenEmpty || input.value.trim()) update();
+	});
+	input.addEventListener("blur", close);
+	input.addEventListener("keydown", (event) => {
+		if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+			if (!items.length) return;
+			event.preventDefault();
+			move(event.key === "ArrowDown" ? 1 : -1);
+		} else if (event.key === "Enter" && selected >= 0) {
+			event.preventDefault();
+			items[selected].run();
+		} else if (event.key === "Escape") {
+			if (selected >= 0) {
+				move(-1 - selected); // back to what you typed
+			} else if (items.length) {
+				close();
+			} else {
+				input.blur();
+			}
+		}
+	});
+
+	return { close };
 }
 
+const addressSuggest = attachSuggest(address, suggestEl, { showRecentWhenEmpty: true });
+const homeSuggest = attachSuggest(homeSearch, document.getElementById("home-suggest"), { showRecentWhenEmpty: false });
 function hideSuggest() {
-	suggestEl.classList.add("hidden");
+	addressSuggest.close();
+	homeSuggest.close();
 }
-
-address.addEventListener("focus", renderSuggest);
-address.addEventListener("input", renderSuggest);
-address.addEventListener("blur", hideSuggest);
-address.addEventListener("keydown", (event) => {
-	if (event.key === "Escape") {
-		hideSuggest();
-		address.blur();
-	}
-});
 
 renderShortcuts();
 
@@ -1172,7 +1662,16 @@ applyTheme(
 		}));
 	}
 
+	// Nothing to see while a website or the games page covers the sky, so it rests until you're back.
+	function covered() {
+		return home.classList.contains("hidden") || !gamesMenu.classList.contains("hidden");
+	}
+
 	function draw(t) {
+		if (covered()) {
+			running = false;
+			return;
+		}
 		const still = calm();
 		ctx.clearRect(0, 0, w, h);
 		ctx.fillStyle = starColor;
@@ -1230,7 +1729,7 @@ applyTheme(
 		ty = event.clientY / h - 0.5;
 	});
 
-	// Called at start and whenever the motion or stars settings change.
+	// Called at start, whenever the motion or stars settings change, and when the sky comes back into view.
 	function refresh() {
 		canvas.hidden = !settings.stars;
 		if (!settings.stars) {
@@ -1257,6 +1756,215 @@ applyTheme(
 })();
 
 /* ============================================================
+   CURSOR TRAILS (Settings > Appearance)
+   Drawn on one see-through layer over everything, in the theme's colors.
+   Works over websites too, since they load through Slow's own address.
+   Only draws while something is moving; "Reduce motion" turns it off.
+   ============================================================ */
+
+const trailCanvas = document.createElement("canvas");
+trailCanvas.className = "cursor-trail";
+trailCanvas.setAttribute("aria-hidden", "true");
+document.body.append(trailCanvas);
+const trailCtx = trailCanvas.getContext("2d");
+
+// Panels like Settings open in the browser's "top layer", above everything else. The trail
+// lives there too, and is lifted back on top whenever one of them opens.
+trailCanvas.popover = "manual";
+function raiseTrail() {
+	try {
+		if (trailCanvas.matches(":popover-open")) trailCanvas.hidePopover();
+		trailCanvas.showPopover();
+	} catch {}
+}
+raiseTrail();
+
+let trailW = 0;
+let trailH = 0;
+let trailLoop = 0;
+let lastPoint = null;
+const dust = []; // stardust: { x, y, vx, vy, born, life, size }
+const comet = []; // comet: recent points { x, y, at }
+const glow = { x: 0, y: 0, tx: 0, ty: 0, alpha: 0, seen: 0 };
+
+function sizeTrail() {
+	const ratio = window.devicePixelRatio || 1;
+	trailW = window.innerWidth;
+	trailH = window.innerHeight;
+	trailCanvas.width = trailW * ratio;
+	trailCanvas.height = trailH * ratio;
+	trailCtx.setTransform(ratio, 0, 0, ratio, 0, 0);
+}
+sizeTrail();
+window.addEventListener("resize", sizeTrail);
+
+function trailOn() {
+	return settings.cursorTrail && settings.cursorTrail !== "off" && !calm();
+}
+
+// Called for every mouse move, on Slow itself or inside a website (already in screen coordinates).
+function trailMove(x, y) {
+	if (!trailOn()) return;
+	const now = performance.now();
+	const style = settings.cursorTrail;
+
+	if (style === "stardust") {
+		// a couple of sparks for every bit of distance travelled
+		const dist = lastPoint ? Math.hypot(x - lastPoint.x, y - lastPoint.y) : 0;
+		const count = Math.min(4, 1 + Math.floor(dist / 12));
+		for (let i = 0; i < count; i++) {
+			dust.push({
+				x: x + (Math.random() - 0.5) * 6,
+				y: y + (Math.random() - 0.5) * 6,
+				vx: (Math.random() - 0.5) * 0.6,
+				vy: (Math.random() - 0.5) * 0.6 + 0.15,
+				born: now,
+				life: 500 + Math.random() * 500,
+				size: 0.8 + Math.random() * 1.8,
+			});
+		}
+		if (dust.length > 300) dust.splice(0, dust.length - 300);
+	} else if (style === "comet") {
+		comet.push({ x, y, at: now });
+	} else if (style === "glow") {
+		glow.tx = x;
+		glow.ty = y;
+		if (!glow.alpha) {
+			glow.x = x;
+			glow.y = y;
+		}
+		glow.seen = now;
+	}
+
+	lastPoint = { x, y };
+	if (!trailLoop) trailLoop = requestAnimationFrame(drawTrail);
+}
+
+// The trail's colors, from Settings: the theme's, your own, or a cycling rainbow.
+// shade: 0 = the main color, 1 = a lighter one (stardust mixes the two so it sparkles).
+// spot: a number that differs along the trail, so a rainbow spreads out instead of being one color.
+function trailColor(alpha, { shade = 0, spot = 0, now = performance.now() } = {}) {
+	const mode = settings.trailColorMode;
+	if (mode === "rainbow") {
+		const hue = (now / 12 + spot * 14) % 360;
+		return `hsla(${hue}, 95%, ${shade ? 82 : 66}%, ${alpha})`;
+	}
+	let rgb;
+	if (mode === "custom" && /^#[0-9a-f]{6}$/i.test(settings.trailColor)) {
+		rgb = hexToRgb(settings.trailColor).split(", ").map(Number);
+	} else {
+		rgb = accentRGB.split(",").map(Number);
+		if (shade) return starColor;
+	}
+	// a lighter version of the color: halfway to white
+	if (shade) rgb = rgb.map((c) => Math.round(c + (255 - c) * 0.55));
+	return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})`;
+}
+
+function drawTrail(now) {
+	trailCtx.clearRect(0, 0, trailW, trailH);
+	let busy = false;
+
+	// stardust
+	for (let i = dust.length - 1; i >= 0; i--) {
+		const p = dust[i];
+		const k = (now - p.born) / p.life;
+		if (k >= 1) {
+			dust.splice(i, 1);
+			continue;
+		}
+		p.x += p.vx;
+		p.y += p.vy;
+		trailCtx.globalAlpha = (1 - k) * (0.6 + 0.4 * Math.sin(now / 60 + i));
+		trailCtx.fillStyle = trailColor(1, { shade: i % 3 ? 1 : 0, spot: i, now });
+		trailCtx.beginPath();
+		trailCtx.arc(p.x, p.y, p.size * (1 - k * 0.5), 0, Math.PI * 2);
+		trailCtx.fill();
+		busy = true;
+	}
+
+	// comet: a tapering tail through the last fraction of a second of movement
+	while (comet.length && now - comet[0].at > 260) comet.shift();
+	if (comet.length > 1) {
+		trailCtx.lineCap = "round";
+		for (let i = 1; i < comet.length; i++) {
+			const k = i / comet.length; // 0 at the tail, 1 at the cursor
+			trailCtx.globalAlpha = k * 0.85;
+			trailCtx.strokeStyle = trailColor(1, { spot: comet.length - i, now });
+			trailCtx.lineWidth = 1 + k * 5;
+			trailCtx.beginPath();
+			trailCtx.moveTo(comet[i - 1].x, comet[i - 1].y);
+			trailCtx.lineTo(comet[i].x, comet[i].y);
+			trailCtx.stroke();
+		}
+		const head = comet[comet.length - 1];
+		trailCtx.globalAlpha = 0.9;
+		trailCtx.fillStyle = trailColor(1, { shade: 1, now });
+		trailCtx.beginPath();
+		trailCtx.arc(head.x, head.y, 3, 0, Math.PI * 2);
+		trailCtx.fill();
+		busy = true;
+	}
+
+	// glow: a soft light easing after the cursor, fading once it stops
+	if (settings.cursorTrail === "glow" || glow.alpha > 0.01) {
+		glow.x += (glow.tx - glow.x) * 0.18;
+		glow.y += (glow.ty - glow.y) * 0.18;
+		const target = settings.cursorTrail === "glow" && now - glow.seen < 900 ? 1 : 0;
+		glow.alpha += (target - glow.alpha) * 0.08;
+		if (glow.alpha > 0.01) {
+			const light = trailCtx.createRadialGradient(glow.x, glow.y, 0, glow.x, glow.y, 46);
+			light.addColorStop(0, trailColor(0.35 * glow.alpha, { now }));
+			light.addColorStop(1, trailColor(0, { now }));
+			trailCtx.globalAlpha = 1;
+			trailCtx.fillStyle = light;
+			trailCtx.fillRect(glow.x - 46, glow.y - 46, 92, 92);
+			busy = true;
+		} else {
+			glow.alpha = 0;
+		}
+	}
+
+	trailCtx.globalAlpha = 1;
+	trailLoop = busy ? requestAnimationFrame(drawTrail) : 0;
+}
+
+// Mouse moves on Slow itself...
+window.addEventListener("pointermove", (event) => {
+	if (event.pointerType !== "touch") trailMove(event.clientX, event.clientY);
+});
+
+// ...and inside websites: listen in each page, shifted by where its frame sits.
+setInterval(() => {
+	for (const tab of tabs) {
+		if (!tab.frame) continue;
+		let win;
+		try {
+			win = tab.frame.frame.contentWindow;
+			if (!win || win.__slowTrail) continue;
+			win.__slowTrail = true;
+		} catch {
+			continue;
+		}
+		const frameEl = tab.frame.frame;
+		win.addEventListener("pointermove", (event) => {
+			if (event.pointerType === "touch") return;
+			const rect = frameEl.getBoundingClientRect();
+			trailMove(rect.left + event.clientX, rect.top + event.clientY);
+		});
+	}
+}, 500);
+
+// Clear anything left on screen when the trail is switched off or changed.
+function resetTrail() {
+	dust.length = 0;
+	comet.length = 0;
+	glow.alpha = 0;
+	lastPoint = null;
+	trailCtx.clearRect(0, 0, trailW, trailH);
+}
+
+/* ============================================================
    SETTINGS PANEL
    ============================================================ */
 
@@ -1275,6 +1983,7 @@ for (const [id, engine] of Object.entries(SEARCH_ENGINES)) {
 function applySettings() {
 	document.documentElement.dataset.motion = settings.reduceMotion ? "reduced" : "full";
 	window.__slowStarfield?.();
+	resetTrail();
 
 	shortcutsEl.closest(".quick-group").classList.toggle("hidden", !settings.showShortcuts);
 	if (!settings.suggestions) hideSuggest();
@@ -1285,6 +1994,9 @@ function applySettings() {
 function fillSettingsForm() {
 	for (const input of settingsForm.querySelectorAll("input[type=checkbox][name]")) {
 		input.checked = Boolean(settings[input.name]);
+	}
+	for (const picker of settingsForm.querySelectorAll("input[type=color][name]")) {
+		picker.value = settings[picker.name];
 	}
 	for (const range of settingsForm.querySelectorAll("input[type=range][name]")) {
 		range.value = String(settings[range.name]);
@@ -1300,6 +2012,7 @@ function fillSettingsForm() {
 function openSettings() {
 	fillSettingsForm();
 	settingsDialog.showModal();
+	raiseTrail();
 }
 
 settingsBtn.addEventListener("click", openSettings);
@@ -1310,6 +2023,12 @@ settingsDialog.addEventListener("click", (event) => {
 });
 
 // Switches and the search engine apply as soon as they change.
+document.getElementById("set-trail-color").addEventListener("input", (event) => {
+	settings.trailColor = event.target.value;
+	settings.trailColorMode = "custom";
+	document.getElementById("set-trail-mode").value = "custom";
+});
+
 settingsForm.addEventListener("change", (event) => {
 	const input = event.target;
 	if (input.type === "checkbox" && input.name) {
@@ -1320,6 +2039,11 @@ settingsForm.addEventListener("change", (event) => {
 			recent = [];
 			writeList(RECENT_KEY, recent);
 		}
+	} else if (input.type === "color" && input.name) {
+		// Picking a trail color switches the trail to that color.
+		settings[input.name] = input.value;
+		if (input.name === "trailColor") settings.trailColorMode = "custom";
+		fillSettingsForm();
 	} else if (input.type === "range" && input.name) {
 		settings[input.name] = Number(input.value);
 		sfx.hover(); // a sample at the new volume
@@ -1513,9 +2237,12 @@ function saveSession() {
 		const urls = tabs.map((t) => t.url || t.pendingUrl || "");
 		// Each tab's volume and mute, so they come back too.
 		const sound = tabs.map((t) => ({ volume: t.volume, muted: t.muted }));
+		// ...and their names and icons, so they look right before they load again.
+		const titles = tabs.map((t) => (t.url || t.pendingUrl ? t.title : ""));
+		const icons = tabs.map((t) => (t.icon && t.icon.length < 2000 ? t.icon : "")); // (skips big embedded pictures)
 		localStorage.setItem(
 			SESSION_KEY,
-			JSON.stringify({ urls, sound, active: tabs.findIndex((t) => t.id === activeId) }),
+			JSON.stringify({ urls, sound, titles, icons, active: tabs.findIndex((t) => t.id === activeId) }),
 		);
 	} catch {}
 }
@@ -1534,7 +2261,7 @@ function restoreSession() {
 		const sound = saved.sound?.[i] || {};
 		tabs.push({
 			id: nextId++,
-			title: url ? hostOf(url) : "New tab",
+			title: url ? (typeof saved.titles?.[i] === "string" && saved.titles[i]) || hostOf(url) : "New tab",
 			url: "",
 			frame: null,
 			el: null,
@@ -1546,12 +2273,57 @@ function restoreSession() {
 			volume: typeof sound.volume === "number" ? Math.min(1, Math.max(0, sound.volume)) : 1,
 			muted: sound.muted === true,
 			soundEl: null,
+			icon: (url && typeof saved.icons?.[i] === "string" && saved.icons[i]) || null,
 		});
 	});
 	const active = tabs[saved.active] || tabs[0];
 	activate(active.id);
 	return true;
 }
+
+/* ============================================================
+   RESTING TABS
+   A tab you haven't looked at for a while lets go of its page (and the memory and
+   processing it uses) unless it's playing sound. It stays in the tab bar, faded, and
+   loads again the moment you open it, just like tabs restored from last time.
+   ============================================================ */
+
+const SLEEP_AFTER = 30 * 60_000;
+
+function sleepTab(tab) {
+	if (!tab.frame || !tab.url) return;
+	tab.frame.frame.remove();
+	tab.frame = null;
+	tab.pendingUrl = tab.url;
+	tab.url = "";
+	tab.loading = false;
+	clearTimeout(tab.loadTimer);
+	clearTimeout(tab.stallTimer);
+	renderTabs();
+}
+
+function tabIsBusy(tab) {
+	if (tab.loading) return true;
+	try {
+		return Boolean(tab.frame.frame.contentWindow.__slowPlaying?.());
+	} catch {
+		return false;
+	}
+}
+
+setInterval(() => {
+	if (!settings.sleepTabs) return;
+	const now = Date.now();
+	for (const tab of tabs) {
+		if (tab.id === activeId || !tab.frame) continue;
+		if (now - (tab.seenAt || now) < SLEEP_AFTER) continue;
+		if (tabIsBusy(tab)) {
+			tab.seenAt = now; // check again later
+			continue;
+		}
+		sleepTab(tab);
+	}
+}, 60_000);
 
 /* ============================================================
    BREAK REMINDERS
@@ -1695,6 +2467,7 @@ function buildPaletteItems(query) {
 		label: t.title,
 		detail: t.url || t.pendingUrl || "New tab page",
 		hint: t.id === activeId ? "Current tab" : "Switch to tab",
+		img: t.frame || t.pendingUrl ? t.icon : BASE + "favicon.svg",
 		run: () => activate(t.id),
 	}));
 	const saved = shortcuts.map((s) => ({
@@ -1729,7 +2502,8 @@ function buildPaletteItems(query) {
 	};
 
 	// Things whose name starts with what you typed go above the web search.
-	const games = GAMES.map((g) => ({
+	const iconGames = [...GAMES, ...MULTIPLAYER.filter((m) => !GAMES.some((g) => g.url === m.url))];
+	const games = iconGames.map((g) => ({
 		kind: "game",
 		icon: g.icon,
 		label: `Play ${g.name}`,
@@ -1737,9 +2511,9 @@ function buildPaletteItems(query) {
 		hint: "Game",
 		run: () => openGame(g),
 	}));
-	// gn-math games join in once their list has loaded (it starts loading when the palette opens).
-	for (const g of gnGames || []) {
-		games.push({ kind: "game", icon: "🎮", label: `Play ${g.name}`, detail: "gn-math", hint: "Game", run: () => openGame(g) });
+	// Games from the collections join in once their lists have loaded (they start loading when the palette opens).
+	for (const g of loadedSourceGames()) {
+		games.push({ kind: "game", icon: "🎮", label: `Play ${g.name}`, detail: g.from, hint: "Game", run: () => openGame(g) });
 	}
 	const all = [...openTabs, ...paletteActions(), ...saved, ...games, ...history].filter(matches);
 	const strong = all.filter((item) => item.label.toLowerCase().startsWith(words[0]));
@@ -1762,6 +2536,13 @@ function renderPalette() {
 		icon.className = `palette-icon ${item.kind}`;
 		icon.textContent = item.icon || KIND_ICON[item.kind];
 		icon.setAttribute("aria-hidden", "true");
+		// Tabs show their site's icon (keeping the plain symbol if it doesn't load).
+		if (item.img) {
+			const img = new Image();
+			img.alt = "";
+			img.addEventListener("load", () => icon.replaceChildren(img), { once: true });
+			img.src = item.img;
+		}
 
 		const text = document.createElement("span");
 		text.className = "palette-text";
@@ -1829,13 +2610,16 @@ function openPalette() {
 	}
 	setGamesMenu(false);
 	if (settingsDialog.open) settingsDialog.close();
-	loadGnMath().then((list) => {
-		if (list && palette.open && paletteInput.value.trim()) renderPalette();
-	});
+	for (const source of GAME_SOURCES) {
+		loadSource(source).then((list) => {
+			if (list && palette.open && paletteInput.value.trim()) renderPalette();
+		});
+	}
 	paletteInput.value = "";
 	paletteIndex = 0;
 	renderPalette();
 	palette.showModal();
+	raiseTrail();
 	paletteInput.focus();
 }
 
@@ -1943,6 +2727,18 @@ function darkSkipped(url) {
 	return settings.darkSkip.includes(hostOf(url));
 }
 
+// Games and apps that are mostly one big drawing area (or a frame or video): flipping their
+// colors costs work on every frame and makes them look wrong, so they're left as they are.
+function pageIsApp(doc) {
+	const win = doc.defaultView;
+	const half = (win.innerWidth * win.innerHeight) / 2;
+	for (const el of doc.querySelectorAll("canvas, iframe, embed, object, video")) {
+		const { width, height } = el.getBoundingClientRect();
+		if (width * height > half) return true;
+	}
+	return false;
+}
+
 function applyPageDarkMode(tab) {
 	if (!tab?.frame) return;
 	const frameEl = tab.frame.frame;
@@ -1957,7 +2753,7 @@ function applyPageDarkMode(tab) {
 
 	const existing = doc.getElementById(DARK_STYLE_ID);
 	const wanted =
-		settings.darkPages && !darkSkipped(tab.url) && doc.body && !pageLooksDark(doc);
+		settings.darkPages && !darkSkipped(tab.url) && doc.body && !pageLooksDark(doc) && !pageIsApp(doc);
 
 	if (wanted && !existing) {
 		const style = doc.createElement("style");
@@ -1974,6 +2770,7 @@ function applyPageDarkMode(tab) {
 
 // Pages keep changing as they load (and sites switch pages without reloading), so check often.
 setInterval(() => {
+	if (document.hidden) return; // nobody is looking
 	const tab = activeTab();
 	if (tab?.frame) {
 		applyPageDarkMode(tab);
@@ -2030,10 +2827,32 @@ function pageScrolls(doc) {
 	return root.scrollHeight - ownSpace > win.innerHeight + 40;
 }
 
+// Pinned things sitting under the bar right now, however deep in the page they are
+// (some sites pin a menu inside other pinned wrappers). Found by looking at points along the bar.
+function pinnedUnderBar(doc) {
+	const win = doc.defaultView;
+	const found = new Set();
+	const y = Math.round(barHeight / 2);
+	for (let i = 0; i < 8; i++) {
+		const x = Math.round((win.innerWidth * (i + 0.5)) / 8);
+		for (const hit of doc.elementsFromPoint(x, y)) {
+			for (let el = hit; el && el !== doc.body && el !== doc.documentElement; el = el.parentElement) {
+				const position = win.getComputedStyle(el).position;
+				if (position === "fixed" || position === "sticky") {
+					found.add(el);
+					break;
+				}
+			}
+		}
+	}
+	return found;
+}
+
 // Moves a site's own top-pinned menus (fixed or sticky) down by the height of Slow's bar.
 function nudgePinned(doc) {
 	const win = doc.defaultView;
-	for (const el of doc.body.querySelectorAll(PINNED_SELECTOR)) {
+	const candidates = new Set([...doc.body.querySelectorAll(PINNED_SELECTOR), ...pinnedUnderBar(doc)]);
+	for (const el of candidates) {
 		const style = win.getComputedStyle(el);
 		const position = style.position;
 		if (position !== "fixed" && position !== "sticky") continue;
@@ -2261,54 +3080,240 @@ const GAMES = [
 	{ name: "Lichess", url: "https://lichess.org", icon: "♟️", tag: "Board", hue: 220 },
 	{ name: "Chrome Dino", url: "https://chromedino.com", icon: "\u{1F996}", tag: "Arcade", hue: 90 },
 	{ name: "Moomoo.io", url: "https://moomoo.io", icon: "\u{1F404}", tag: "Survival", hue: 60 },
+	{ name: "Poki", url: "https://poki.com", icon: "🎮", tag: "Game site", hue: 200 },
+	{ name: "CrazyGames", url: "https://www.crazygames.com", icon: "🕹️", tag: "Game site", hue: 270 },
+	{ name: "Coolmath Games", url: "https://www.coolmathgames.com", icon: "➗", tag: "Game site", hue: 15 },
+	{ name: "Miniclip", url: "https://www.miniclip.com", icon: "🎱", tag: "Game site", hue: 50 },
+	{ name: "Run 3", url: "https://www.coolmathgames.com/0-run-3", icon: "🌌", tag: "Arcade", hue: 240 },
+	{ name: "OvO", url: "https://www.coolmathgames.com/0-ovo", icon: "🤸", tag: "Platformer", hue: 0 },
+	{ name: "Slow Roads", url: "https://slowroads.io", icon: "🛣️", tag: "Driving", hue: 35 },
+	{ name: "Infinite Craft", url: "https://neal.fun/infinite-craft/", icon: "🔥", tag: "Crafting", hue: 20 },
+	{ name: "Connections", url: "https://www.nytimes.com/games/connections", icon: "🟪", tag: "Word", hue: 275 },
+	{ name: "Strands", url: "https://www.nytimes.com/games/strands", icon: "🔤", tag: "Word", hue: 175 },
+	{ name: "Contexto", url: "https://contexto.me", icon: "🧠", tag: "Word", hue: 330 },
+	{ name: "Worldle", url: "https://worldle.teuteuf.fr", icon: "🌍", tag: "Geography", hue: 150 },
+	{ name: "Quick, Draw!", url: "https://quickdraw.withgoogle.com", icon: "🖍️", tag: "Drawing", hue: 55 },
+	{ name: "Line Rider", url: "https://www.linerider.com", icon: "🛷", tag: "Physics", hue: 205 },
+	{ name: "HexGL", url: "https://hexgl.bkcore.com/play/", icon: "🚀", tag: "Racing", hue: 190 },
+	{ name: "Pac-Man", url: "https://www.google.com/logos/2010/pacman10-i.html", icon: "🟡", tag: "Arcade", hue: 50 },
+	{ name: "Google Snake", url: "https://www.google.com/fbx?fbx=snake_arcade", icon: "🐍", tag: "Arcade", hue: 110 },
+	{ name: "Tetris", url: "https://tetris.com/play-tetris", icon: "🟦", tag: "Puzzle", hue: 220 },
+	{ name: "Sudoku", url: "https://sudoku.com", icon: "9️⃣", tag: "Puzzle", hue: 230 },
+	{ name: "Solitaire", url: "https://solitaired.com", icon: "🃏", tag: "Cards", hue: 140 },
+	{ name: "Chess.com", url: "https://www.chess.com/play/computer", icon: "♞", tag: "Board", hue: 95 },
+	{ name: "A Dark Room", url: "https://adarkroom.doublespeakgames.com", icon: "🕯️", tag: "Adventure", hue: 30 },
+	{ name: "Universal Paperclips", url: "https://www.decisionproblem.com/paperclips/index2.html", icon: "📎", tag: "Idle", hue: 210 },
+	{ name: "Candy Box 2", url: "https://candybox2.github.io", icon: "🍬", tag: "Adventure", hue: 320 },
+	{ name: "Bad Time Simulator", url: "https://jcw87.github.io/c2-sans-fight/", icon: "💀", tag: "Fan game", hue: 200 },
 ];
 
-/* ---------- gn-math ---------- */
-
-// gn-math's game list, tried in order (the second is a backup copy of the same file).
-const GN_MATH_LISTS = [
-	"https://gn-math.github.io/assets/zones.json",
-	"https://raw.githubusercontent.com/gn-math/assets/main/zones.json",
+// Well-known online games you play against other people (the Multiplayer tab).
+const MULTIPLAYER = [
+	{ name: "Slither.io", url: "https://slither.io", icon: "🐍", tag: "Snake", hue: 140 },
+	{ name: "Krunker", url: "https://krunker.io", icon: "🎯", tag: "Shooter", hue: 30 },
+	{ name: "Shell Shockers", url: "https://shellshock.io", icon: "🥚", tag: "Shooter", hue: 45 },
+	{ name: "Smash Karts", url: "https://smashkarts.io", icon: "🏎️", tag: "Racing", hue: 15 },
+	{ name: "Bloxd.io", url: "https://bloxd.io", icon: "🧊", tag: "Building", hue: 200 },
+	{ name: "Miniblox", url: "https://miniblox.io", icon: "⛏️", tag: "Building", hue: 110 },
+	{ name: "Zombs Royale", url: "https://zombsroyale.io", icon: "🪂", tag: "Battle royale", hue: 280 },
+	{ name: "Suroi", url: "https://suroi.io", icon: "🔫", tag: "Battle royale", hue: 100 },
+	{ name: "Build Royale", url: "https://buildroyale.io", icon: "🏗️", tag: "Battle royale", hue: 40 },
+	{ name: "Yohoho.io", url: "https://yohoho.io", icon: "🏴‍☠️", tag: "Battle royale", hue: 10 },
+	{ name: "Venge.io", url: "https://venge.io", icon: "💥", tag: "Shooter", hue: 350 },
+	{ name: "EV.IO", url: "https://ev.io", icon: "🚀", tag: "Shooter", hue: 240 },
+	{ name: "Kour.io", url: "https://kour.io", icon: "🪖", tag: "Shooter", hue: 75 },
+	{ name: "Repuls.io", url: "https://repuls.io", icon: "🛡️", tag: "Shooter", hue: 220 },
+	{ name: "Voxiom.io", url: "https://voxiom.io", icon: "🟫", tag: "Shooter", hue: 20 },
+	{ name: "Narrow.One", url: "https://narrow.one", icon: "🏹", tag: "Archery", hue: 50 },
+	{ name: "Diep.io", url: "https://diep.io", icon: "🔺", tag: "Tanks", hue: 210 },
+	{ name: "Arras.io", url: "https://arras.io", icon: "⚙️", tag: "Tanks", hue: 180 },
+	{ name: "Wormate.io", url: "https://wormate.io", icon: "🪱", tag: "Snake", hue: 320 },
+	{ name: "Little Big Snake", url: "https://littlebigsnake.com", icon: "🐉", tag: "Snake", hue: 130 },
+	{ name: "Powerline.io", url: "https://powerline.io", icon: "⚡", tag: "Snake", hue: 55 },
+	{ name: "Splix.io", url: "https://splix.io", icon: "🟦", tag: "Territory", hue: 205 },
+	{ name: "Hexanaut.io", url: "https://hexanaut.io", icon: "🔷", tag: "Territory", hue: 225 },
+	{ name: "Territorial.io", url: "https://territorial.io", icon: "🗺️", tag: "Strategy", hue: 160 },
+	{ name: "Lordz.io", url: "https://lordz.io", icon: "👑", tag: "Strategy", hue: 45 },
+	{ name: "Moomoo.io", url: "https://moomoo.io", icon: "🐄", tag: "Survival", hue: 60 },
+	{ name: "Sploop.io", url: "https://sploop.io", icon: "🪓", tag: "Survival", hue: 70 },
+	{ name: "Starve.io", url: "https://starve.io", icon: "❄️", tag: "Survival", hue: 195 },
+	{ name: "Taming.io", url: "https://taming.io", icon: "🐺", tag: "Survival", hue: 85 },
+	{ name: "Zombs.io", url: "https://zombs.io", icon: "🧟", tag: "Survival", hue: 95 },
+	{ name: "Florr.io", url: "https://florr.io", icon: "🌸", tag: "Survival", hue: 310 },
+	{ name: "Deeeep.io", url: "https://deeeep.io", icon: "🐟", tag: "Survival", hue: 195 },
+	{ name: "Stabfish.io", url: "https://stabfish.io", icon: "🗡️", tag: "Survival", hue: 185 },
+	{ name: "Bonk.io", url: "https://bonk.io", icon: "🟠", tag: "Physics", hue: 25 },
+	{ name: "HaxBall", url: "https://www.haxball.com", icon: "⚽", tag: "Sports", hue: 120 },
+	{ name: "skribbl.io", url: "https://skribbl.io", icon: "✏️", tag: "Drawing", hue: 260 },
+	{ name: "Gartic Phone", url: "https://garticphone.com", icon: "📞", tag: "Party", hue: 330 },
+	{ name: "Codenames", url: "https://codenames.game", icon: "🕵️", tag: "Party", hue: 0 },
+	{ name: "TETR.IO", url: "https://tetr.io", icon: "🧱", tag: "Puzzle", hue: 280 },
+	{ name: "Lichess", url: "https://lichess.org", icon: "♟️", tag: "Board", hue: 220 },
 ];
-// The list uses {HTML_URL} and {COVER_URL} placeholders; these are where those files live.
+
+// Lists drawn as icon cards (not covers), by tab.
+const CARD_LISTS = { popular: GAMES, multiplayer: MULTIPLAYER };
+
+/* ---------- game collections ----------
+   Each collection publishes its own list of games, loaded live when you open it.
+   To add one: give it an id and name, where its list lives (backups after the first),
+   and how to turn that list into { name, url, cover, tag, author }. */
+
 const GN_MATH_HTML = "https://gn-math.github.io/html";
 const GN_MATH_COVERS = "https://raw.githubusercontent.com/gn-math/covers/main";
-const GN_MATH_PAGE = 60; // how many cards to draw at a time
+const SELENITE_GAMES = "https://selenite.cc/resources/semag";
+const KHO_SITE = "https://3kh0.github.io/";
+const UGS_FILES = "https://cdn.jsdelivr.net/gh/bubbls/ugs-singlefile/UGS-Files/"; // the same address is used in sw.js
 
-let gnGames = null; // the loaded list
-let gnLoad = null; // the request in progress, so it only happens once
-let gnFailed = false;
-let gnShown = GN_MATH_PAGE;
+const GAME_SOURCES = [
+	{
+		id: "gnmath",
+		name: "gn-math",
+		lists: [
+			"https://gn-math.github.io/assets/zones.json",
+			"https://raw.githubusercontent.com/gn-math/assets/main/zones.json",
+		],
+		// Uses {HTML_URL} and {COVER_URL} placeholders for where its files live.
+		toGames: (list) =>
+			list
+				.filter((g) => typeof g.url === "string" && g.url.startsWith("{HTML_URL}") && !String(g.name).startsWith("[!]"))
+				.map((g) => ({
+					name: String(g.name),
+					url: g.url.replace("{HTML_URL}", GN_MATH_HTML),
+					cover: String(g.cover || "").replace("{COVER_URL}", GN_MATH_COVERS),
+					tag: g.author ? String(g.author) : "",
+					author: g.author ? String(g.author) : "",
+				})),
+	},
+	{
+		id: "selenite",
+		name: "Selenite",
+		lists: ["https://selenite.cc/resources/games.json"],
+		// Each game is a folder with an index.html and a picture in it.
+		toGames: (list) =>
+			list
+				.filter((g) => typeof g.directory === "string" && g.directory)
+				.map((g) => ({
+					name: String(g.name),
+					url: `${SELENITE_GAMES}/${g.directory}/index.html`,
+					cover: g.image ? `${SELENITE_GAMES}/${g.directory}/${g.image}` : "",
+					tag: (g.tags || []).filter((t) => t !== "top").join(", "),
+					author: "",
+				})),
+	},
+	{
+		id: "3kh0",
+		name: "3kh0",
+		lists: ["https://raw.githubusercontent.com/3kh0/3kh0-lite/main/config/games.json"],
+		// Links and pictures are relative to the 3kh0 site.
+		toGames: (list) =>
+			list
+				.filter((g) => typeof g.link === "string" && g.link)
+				.map((g) => ({
+					name: String(g.title),
+					url: KHO_SITE + g.link,
+					cover: g.imgSrc ? KHO_SITE + g.imgSrc : "",
+					tag: "",
+					author: "",
+				})),
+	},
+	{
+		id: "ugs",
+		name: "UGS",
+		lists: ["https://cdn.jsdelivr.net/gh/bubbls/ugs-singlefile/games.js"],
+		// Ultimate Game Stash keeps its list as a script: `let files = ["cl2048", ...]`.
+		// Each name (after its "cl" start) is a single-page game in UGS-Files. No pictures.
+		parse: (text) => [...(text.match(/let files = \[([\s\S]*?)\];/)?.[1] || "").matchAll(/"([^"]+)"/g)].map((m) => m[1]),
+		toGames: (list) =>
+			[...new Set(list)]
+				.filter((file) => /^cl./i.test(file))
+				.map((file) => {
+					const name = file.slice(2);
+					return {
+						name: name.charAt(0).toUpperCase() + name.slice(1),
+						url: UGS_FILES + encodeURIComponent(`${file}.html`),
+						cover: "",
+						tag: "",
+						author: "",
+					};
+				}),
+	},
+];
 
-function loadGnMath() {
-	if (!gnLoad) {
-		gnLoad = (async () => {
-			for (const listUrl of GN_MATH_LISTS) {
+const SOURCE_PAGE = 60; // how many cards to draw at a time
+const sourceState = Object.fromEntries(
+	GAME_SOURCES.map((s) => [s.id, { games: null, load: null, failed: false }]),
+);
+
+function gameSource(id) {
+	return GAME_SOURCES.find((s) => s.id === id);
+}
+
+// Loads a collection's list once (trying its backup copies in turn).
+function loadSource(source) {
+	const state = sourceState[source.id];
+	if (!state.load) {
+		state.load = (async () => {
+			for (const listUrl of source.lists) {
 				try {
 					const res = await fetch(listUrl, { cache: "no-cache" });
 					if (!res.ok) continue;
-					const list = await res.json();
-					gnGames = list
-						.filter((g) => typeof g.url === "string" && g.url.startsWith("{HTML_URL}"))
-						.map((g) => ({
-							name: String(g.name),
-							url: g.url.replace("{HTML_URL}", GN_MATH_HTML),
-							cover: String(g.cover || "").replace("{COVER_URL}", GN_MATH_COVERS),
-							tag: g.author ? String(g.author) : "",
-						}));
-					gnFailed = false;
-					return gnGames;
+					const list = source.parse ? source.parse(await res.text()) : await res.json();
+					state.games = source.toGames(Array.isArray(list) ? list : Object.values(list));
+					state.failed = false;
+					showGamesTotal();
+					return state.games;
 				} catch {
 					// try the next copy
 				}
 			}
-			gnFailed = true;
-			gnLoad = null; // let a later open try again
+			state.failed = true;
+			state.load = null; // let a later open try again
 			return null;
 		})();
 	}
-	return gnLoad;
+	return state.load;
 }
+
+// Every game from every collection that has loaded so far (the Ctrl+K palette searches these).
+function loadedSourceGames() {
+	return GAME_SOURCES.flatMap((s) => (sourceState[s.id].games || []).map((g) => ({ ...g, from: s.name })));
+}
+
+/* ---------- preload every game's picture ----------
+   Shortly after Slow opens, every collection's list loads and each cover is saved in Slow's own
+   cache (the service worker shows them from there). Each picture downloads once, ever, so the
+   games page has them all ready. Pictures that don't exist are remembered, to show the letter right away. */
+
+const COVER_CACHE = "slow-covers"; // the same name is used in sw.js
+const missingCovers = new Set();
+
+async function preloadCovers() {
+	if (!("caches" in window) || navigator.connection?.saveData) return;
+	const cache = await caches.open(COVER_CACHE);
+	await Promise.all(GAME_SOURCES.map(loadSource));
+	const queue = [...new Set(loadedSourceGames().map((g) => g.cover).filter(Boolean))];
+
+	// A few at a time, pausing whenever a page is loading, so websites you're using stay fast.
+	const worker = async () => {
+		while (queue.length) {
+			while (tabs.some((t) => t.loading) || document.hidden) await new Promise((r) => setTimeout(r, 1000));
+			const url = queue.shift();
+			try {
+				if (await cache.match(url)) continue;
+				const res = await fetch(url, { mode: "cors" });
+				if (res.ok) await cache.put(url, res);
+				else missingCovers.add(url);
+			} catch {
+				missingCovers.add(url);
+			}
+		}
+	};
+	await Promise.all(Array.from({ length: 3 }, worker));
+}
+
+// Starts once Slow has settled in, so it doesn't compete with the first sites you open.
+window.addEventListener("load", () => setTimeout(() => preloadCovers().catch(() => {}), 12000));
 
 /* ---------- the menu ---------- */
 
@@ -2317,12 +3322,31 @@ const gamesBtn = document.getElementById("btn-games");
 const gamesMenu = document.getElementById("games-menu");
 const gamesGrid = document.getElementById("games-grid");
 const gamesFilter = document.getElementById("games-filter");
+const gamesClear = document.getElementById("games-clear");
 const gamesNote = document.getElementById("games-note");
-const gamesViewBtns = gamesMenu.querySelectorAll("[data-view]");
+const gamesViews = gamesMenu.querySelector(".games-views");
+
+// One switch for the popular picks, then one per collection.
+gamesViews.textContent = "";
+for (const view of [
+	{ id: "popular", name: "Popular" },
+	{ id: "multiplayer", name: "Multiplayer" },
+	{ id: "all", name: "All" },
+	...GAME_SOURCES,
+]) {
+	const btn = document.createElement("button");
+	btn.type = "button";
+	btn.setAttribute("role", "tab");
+	btn.dataset.view = view.id;
+	btn.textContent = view.name;
+	gamesViews.append(btn);
+}
+const gamesViewBtns = gamesViews.querySelectorAll("[data-view]");
 
 let gamesView = (() => {
 	try {
-		return localStorage.getItem(GAMES_VIEW_KEY) === "gnmath" ? "gnmath" : "popular";
+		const saved = localStorage.getItem(GAMES_VIEW_KEY);
+		return CARD_LISTS[saved] || saved === "all" || gameSource(saved) ? saved : "popular";
 	} catch {
 		return "popular";
 	}
@@ -2336,8 +3360,48 @@ function openGame(game) {
 	if (tab) navigate(tab, game.url);
 }
 
-function gameMatches(game, query) {
-	return !query || game.name.toLowerCase().includes(query) || game.tag.toLowerCase().includes(query);
+/* ---------- search ----------
+   Spaces, capitals and punctuation don't matter ("drive mad" finds "Drivemad"), words can
+   come in any order, and the closest matches come first. */
+
+const squash = (text) => String(text).toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+// 0 means no match; higher is a closer match.
+function matchScore(game, query) {
+	const whole = squash(query);
+	if (!whole) return 1;
+	const name = squash(game.name);
+	if (name === whole) return 6;
+	if (name.startsWith(whole)) return 5;
+	if (name.includes(whole)) return 4;
+	const words = query.split(/\s+/).map(squash).filter(Boolean);
+	if (words.every((w) => name.includes(w))) return 3;
+	const tag = squash(game.tag);
+	if (words.every((w) => name.includes(w) || tag.includes(w))) return 2;
+	return 0;
+}
+
+// The games that match, closest first (ties keep the list's own order).
+function searchGames(games, query) {
+	if (!squash(query)) return games;
+	return games
+		.map((game, i) => ({ game, i, score: matchScore(game, query) }))
+		.filter((m) => m.score)
+		.sort((a, b) => b.score - a.score || a.i - b.i)
+		.map((m) => m.game);
+}
+
+// "Nothing found", with a quick way to look everywhere else.
+function noMatches(query) {
+	const p = gamesMessage(`No games match “${query}” here. `);
+	if (gamesView !== "all") {
+		const everywhere = document.createElement("button");
+		everywhere.type = "button";
+		everywhere.className = "text-btn";
+		everywhere.textContent = "Search all games";
+		everywhere.addEventListener("click", () => setGamesView("all"));
+		p.append(everywhere);
+	}
 }
 
 function gamesMessage(text) {
@@ -2378,101 +3442,203 @@ function coverCard(game, i) {
 	const btn = document.createElement("button");
 	btn.type = "button";
 	btn.className = "game cover";
-	btn.title = game.tag ? `Play ${game.name} (by ${game.tag})` : `Play ${game.name}`;
-	btn.style.setProperty("--i", String(i % GN_MATH_PAGE));
+	btn.title = game.author ? `Play ${game.name} (by ${game.author})` : `Play ${game.name}`;
+	btn.style.setProperty("--i", String(i % SOURCE_PAGE));
+	if (game.hue !== undefined) btn.style.setProperty("--hue", String(game.hue));
 
-	const img = document.createElement("img");
-	img.className = "game-cover";
-	img.src = game.cover;
-	img.alt = "";
-	img.loading = "lazy";
-	img.decoding = "async";
-	// No cover? Show the game's first letter instead.
-	img.addEventListener("error", () => {
+	const letterCover = () => {
 		const letter = document.createElement("span");
 		letter.className = "game-cover letter";
 		letter.textContent = game.name.replace(/[^a-z0-9]/gi, "").charAt(0).toUpperCase() || "?";
-		img.replaceWith(letter);
-	});
+		return letter;
+	};
+
+	let cover;
+	if (game.cover && !missingCovers.has(game.cover)) {
+		cover = document.createElement("img");
+		cover.className = "game-cover";
+		// Asked for in "cross-origin" mode: Slow's page only shows other sites' pictures that way.
+		cover.crossOrigin = "anonymous";
+		cover.src = game.cover;
+		cover.alt = "";
+		cover.decoding = "async";
+		// Fades in once it's ready, instead of popping in.
+		if (!cover.complete) {
+			cover.classList.add("waiting");
+			cover.addEventListener("load", () => cover.classList.remove("waiting"), { once: true });
+		}
+		// No picture after all? Show the game's first letter instead.
+		cover.addEventListener("error", () => cover.replaceWith(letterCover()));
+	} else if (game.icon) {
+		// Popular and Multiplayer games (shown in All) use their icon.
+		cover = document.createElement("span");
+		cover.className = "game-cover icon";
+		cover.textContent = game.icon;
+	} else {
+		cover = letterCover();
+	}
 
 	const name = document.createElement("span");
 	name.className = "game-name";
 	name.textContent = game.name;
 
-	btn.append(img, name);
+	btn.append(cover, name);
+	// In "All", say which collection it's from (some games are in more than one).
+	if (gamesView === "all" && game.from) {
+		const from = document.createElement("span");
+		from.className = "game-tag";
+		from.textContent = game.from;
+		btn.append(from);
+	}
 	btn.addEventListener("click", () => openGame(game));
 	return btn;
 }
 
-function renderGames() {
-	const query = gamesFilter.value.trim().toLowerCase();
+// The count next to the title: every game on every tab (each counted once), growing as lists load.
+const gamesTotal = document.getElementById("games-total");
+function showGamesTotal() {
+	const urls = new Set([...GAMES, ...MULTIPLAYER, ...loadedSourceGames()].map((g) => g.url));
+	const loading = GAME_SOURCES.some((s) => !sourceState[s.id].games && !sourceState[s.id].failed);
+	gamesTotal.textContent = `${urls.size.toLocaleString()}${loading ? "+" : ""} games`;
+}
+
+// `fresh` (opening the page or switching tabs) plays the cards' fade-in; typing doesn't, so results don't flicker.
+function renderGames({ fresh = false } = {}) {
+	showGamesTotal();
+	const query = gamesFilter.value.trim();
+	gamesClear.hidden = !query;
 	gamesGrid.textContent = "";
-	gamesGrid.classList.toggle("covers", gamesView === "gnmath");
+	gamesGrid.classList.toggle("covers", !CARD_LISTS[gamesView]);
+	gamesGrid.classList.toggle("animate", fresh);
 	for (const btn of gamesViewBtns) {
 		btn.setAttribute("aria-selected", String(btn.dataset.view === gamesView));
 	}
 
-	if (gamesView === "popular") {
-		const shown = GAMES.filter((g) => gameMatches(g, query));
+	if (CARD_LISTS[gamesView]) {
+		const shown = searchGames(CARD_LISTS[gamesView], query);
 		shown.forEach((game, i) => gamesGrid.append(popularCard(game, i)));
-		if (!shown.length) gamesMessage("No games match that.");
-		gamesNote.textContent = "Games open in a tab through Slow. Some need a moment to load.";
+		if (!shown.length) noMatches(query);
+		gamesNote.textContent = query
+			? `${shown.length} of ${CARD_LISTS[gamesView].length} games`
+			: gamesView === "multiplayer"
+				? "Play online against people from everywhere. Each opens the game's own site in a tab."
+				: "Games open in a tab through Slow. Some need a moment to load.";
 		return;
 	}
 
-	// gn-math
-	if (!gnGames) {
-		if (gnFailed) {
-			const p = gamesMessage("Couldn't reach gn-math right now. Their site may be down or blocked. ");
+	if (gamesView === "all") {
+		const waiting = GAME_SOURCES.filter((s) => !sourceState[s.id].games && !sourceState[s.id].failed);
+		for (const s of waiting) {
+			loadSource(s).then(() => {
+				if (gamesView === "all" && !gamesMenu.classList.contains("hidden")) refreshGames();
+			});
+		}
+		showCoverGames(allGames(), query, "");
+		return;
+	}
+
+	const source = gameSource(gamesView);
+	const state = sourceState[source.id];
+	if (!state.games) {
+		if (state.failed) {
+			const p = gamesMessage(`Couldn't reach ${source.name} right now. Their site may be down or blocked. `);
 			const retry = document.createElement("button");
 			retry.type = "button";
 			retry.className = "text-btn";
 			retry.textContent = "Try again";
 			retry.addEventListener("click", () => {
-				gnFailed = false;
+				state.failed = false;
 				renderGames();
 			});
 			p.append(retry);
 		} else {
-			gamesMessage("Loading gn-math games…");
-			loadGnMath().then(() => {
-				if (gamesView === "gnmath" && !gamesMenu.classList.contains("hidden")) renderGames();
+			gamesMessage(`Loading ${source.name} games…`);
+			loadSource(source).then(() => {
+				if (gamesView === source.id && !gamesMenu.classList.contains("hidden")) renderGames({ fresh: true });
 			});
 		}
-		gamesNote.textContent = "From gn-math, a free collection of web games.";
+		gamesNote.textContent = `From ${source.name}, a free collection of web games.`;
 		return;
 	}
 
-	const matches = gnGames.filter((g) => gameMatches(g, query));
-	matches.slice(0, gnShown).forEach((game, i) => gamesGrid.append(coverCard(game, i)));
+	showCoverGames(state.games, query, source.name);
+}
 
-	if (!matches.length) {
-		gamesMessage("No games match that.");
-	} else if (matches.length > gnShown) {
-		const more = document.createElement("button");
-		more.type = "button";
-		more.className = "games-more";
-		more.textContent = `Show more (${matches.length - gnShown} left)`;
-		more.addEventListener("click", () => {
-			const scroll = gamesGrid.scrollTop;
-			gnShown += GN_MATH_PAGE;
-			renderGames();
-			gamesGrid.scrollTop = scroll;
-		});
-		gamesGrid.append(more);
+// Redraws after a list finishes loading, keeping your place in the list.
+function refreshGames() {
+	const scroll = gamesGrid.scrollTop;
+	const drawn = coverDrawn;
+	renderGames();
+	while (coverDrawn < drawn && coverDrawn < coverList.length) drawMoreCovers();
+	gamesGrid.scrollTop = scroll;
+}
+
+// Every game on every tab, each once, A to Z (names that start with a symbol go last).
+function allGames() {
+	const seen = new Set();
+	const games = [];
+	const add = (game) => {
+		if (seen.has(game.url)) return;
+		seen.add(game.url);
+		games.push(game);
+	};
+	GAMES.forEach((g) => add({ ...g, from: "Popular" }));
+	MULTIPLAYER.forEach((g) => add({ ...g, from: "Multiplayer" }));
+	loadedSourceGames().forEach(add);
+	const odd = (g) => !/^[a-z0-9]/i.test(g.name);
+	return games.sort((a, b) => odd(a) - odd(b) || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+}
+
+/* ---------- cover grid: more cards are drawn as you scroll near the end ---------- */
+
+let coverList = []; // what the open tab is showing, in order
+let coverDrawn = 0; // how many of those have cards so far
+const moreSentinel = document.createElement("div");
+moreSentinel.className = "games-sentinel";
+const moreObserver = new IntersectionObserver(
+	(entries) => {
+		if (entries.some((e) => e.isIntersecting)) drawMoreCovers();
+	},
+	{ root: gamesGrid, rootMargin: "0px 0px 900px 0px" },
+);
+
+function drawMoreCovers() {
+	const next = coverList.slice(coverDrawn, coverDrawn + SOURCE_PAGE);
+	const cards = document.createDocumentFragment();
+	next.forEach((game, i) => cards.append(coverCard(game, coverDrawn + i)));
+	moreSentinel.before(cards);
+	coverDrawn += next.length;
+	moreObserver.unobserve(moreSentinel);
+	// Watching again checks right away, so a tall screen keeps filling until it's full.
+	if (coverDrawn < coverList.length) moreObserver.observe(moreSentinel);
+	else moreSentinel.remove();
+}
+
+// `name` is the collection's (blank for All).
+function showCoverGames(games, query, name) {
+	coverList = searchGames(games, query);
+	coverDrawn = 0;
+	gamesGrid.append(moreSentinel);
+	if (coverList.length) drawMoreCovers();
+	else if (query) noMatches(query);
+	else gamesMessage("Loading games…");
+
+	if (query) {
+		gamesNote.textContent = `${coverList.length.toLocaleString()} of ${games.length.toLocaleString()} games`;
+	} else if (name) {
+		gamesNote.textContent = `${games.length.toLocaleString()} games from ${name}.`;
+	} else {
+		const from = GAME_SOURCES.filter((s) => sourceState[s.id].games).map((s) => s.name);
+		gamesNote.textContent = `${games.length.toLocaleString()} games from ${new Intl.ListFormat("en").format(["Slow's picks", ...from])}.`;
 	}
-	gamesNote.textContent = query
-		? `${matches.length} of ${gnGames.length} gn-math games`
-		: `${gnGames.length} games from gn-math. Covers load as you scroll.`;
 }
 
 function setGamesView(view) {
 	gamesView = view;
-	gnShown = GN_MATH_PAGE;
 	try {
 		localStorage.setItem(GAMES_VIEW_KEY, view);
 	} catch {}
-	renderGames();
+	renderGames({ fresh: true });
 	gamesGrid.scrollTop = 0;
 	gamesFilter.focus();
 }
@@ -2486,10 +3652,11 @@ function setGamesMenu(open) {
 	gamesMenu.classList.toggle("hidden", !open);
 	gamesBtn.setAttribute("aria-expanded", String(open));
 	gamesBtn.classList.toggle("on", open);
+	if (!open) window.__slowStarfield?.();
 	if (open) {
 		gamesFilter.value = "";
-		gnShown = GN_MATH_PAGE;
-		renderGames();
+		renderGames({ fresh: true });
+		gamesGrid.scrollTop = 0;
 		gamesFilter.focus();
 	}
 }
@@ -2499,11 +3666,21 @@ gamesBtn.addEventListener("click", (event) => {
 	setGamesMenu(gamesMenu.classList.contains("hidden"));
 });
 
+document.getElementById("games-close").addEventListener("click", () => setGamesMenu(false));
+
 gamesFilter.addEventListener("input", () => {
-	gnShown = GN_MATH_PAGE;
 	renderGames();
 	gamesGrid.scrollTop = 0;
 });
+
+function clearGamesSearch() {
+	gamesFilter.value = "";
+	renderGames();
+	gamesGrid.scrollTop = 0;
+	gamesFilter.focus();
+}
+
+gamesClear.addEventListener("click", clearGamesSearch);
 
 // Enter opens the first game that matches.
 gamesFilter.addEventListener("keydown", (event) => {
@@ -2513,14 +3690,17 @@ gamesFilter.addEventListener("keydown", (event) => {
 	}
 });
 
-// Uses the click's path (recorded before any redraw) so buttons that redraw the menu don't count as outside clicks.
-document.addEventListener("click", (event) => {
-	const path = event.composedPath();
-	if (!path.includes(gamesMenu) && !path.includes(gamesBtn)) setGamesMenu(false);
-});
-
 document.addEventListener("keydown", (event) => {
-	if (event.key === "Escape") setGamesMenu(false);
+	if (gamesMenu.classList.contains("hidden")) return;
+	// Escape clears the search first, then closes the page.
+	if (event.key === "Escape") {
+		if (gamesFilter.value) clearGamesSearch();
+		else setGamesMenu(false);
+		return;
+	}
+	// Start typing anywhere on the page to search.
+	const typing = event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
+	if (typing && document.activeElement !== gamesFilter) gamesFilter.focus();
 });
 
 /* ---------- hover sound effects ---------- */
@@ -2584,3 +3764,23 @@ requestAnimationFrame(() => requestAnimationFrame(() => tabGlider.classList.add(
 /* ---------- start up: bring back last time's tabs, or open a fresh one ---------- */
 
 if (!restoreSession()) newTab();
+
+// A link ending in "#wisp=wss://..." (like the one `npm run share` prints) switches Slow to that
+// wisp server and remembers it, the same as setting it in Settings > Connection.
+(() => {
+	const link = location.hash.match(/^#wisp=(.+)$/);
+	if (!link) return;
+	// Take it out of the address bar (it holds your private key).
+	history.replaceState(null, "", location.pathname + location.search);
+	let wispUrl = "";
+	try {
+		wispUrl = decodeURIComponent(link[1]);
+	} catch {}
+	if (!/^wss?:\/\/[^\s/]+/i.test(wispUrl)) return;
+	settings.wispUrl = wispUrl;
+	saveSettings();
+	notify("Websites now load through your own server. You can change this in Settings > Connection.");
+})();
+
+// Connect to the proxy now, so the first site you open (and restored tabs' icons) don't wait for it.
+ensureReady().catch(() => {});

@@ -12,7 +12,8 @@
 		"format": "prettier --write .",
 		"lint": "eslint ./src/",
 		"lint:fix": "eslint ./src/ --fix",
-		"build:pages": "node scripts/build-pages.mjs"
+		"build:pages": "node scripts/build-pages.mjs",
+		"share": "node scripts/share.mjs"
 	},
 	"keywords": [
 		"proxy"
