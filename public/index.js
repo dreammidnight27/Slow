@@ -2177,6 +2177,437 @@ function hideNotice() {
 }
 
 /* ============================================================
+   ANNOUNCEMENTS
+   Messages from Slow's developers, kept in announcements.json (posted from dev mode).
+   The bell shows when there are any, with a dot for ones you haven't read.
+   "Important" ones also pop up once when you open Slow.
+   ============================================================ */
+
+const NEWS_SEEN_KEY = "slow.newsSeen";
+const newsBtn = document.getElementById("btn-news");
+const newsDot = newsBtn.querySelector(".news-dot");
+const newsDialog = document.getElementById("news");
+const newsList = document.getElementById("news-list");
+
+let announcements = [];
+let newsSeen = new Set(readList(NEWS_SEEN_KEY));
+const newsPopped = new Set();
+
+// Only well-formed announcements that haven't run out; newest first.
+function liveAnnouncements(list) {
+	const now = Date.now();
+	return (Array.isArray(list) ? list : [])
+		.filter((a) => a && typeof a.id === "string" && typeof a.title === "string" && typeof a.message === "string")
+		.filter((a) => !a.expires || Date.parse(a.expires) > now)
+		.sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
+}
+
+function safeLink(value) {
+	try {
+		const url = new URL(value);
+		return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+	} catch {
+		return null;
+	}
+}
+
+function openInNewTab(url) {
+	const tab = newTab();
+	if (tab) navigate(tab, url, { here: true });
+}
+
+async function loadAnnouncements() {
+	try {
+		const res = await fetch(BASE + "announcements.json", { cache: "no-cache" });
+		if (!res.ok) return;
+		announcements = liveAnnouncements((await res.json()).announcements);
+	} catch {
+		return;
+	}
+	updateNewsButton();
+	const important = announcements.find((a) => a.important && !newsSeen.has(a.id) && !newsPopped.has(a.id));
+	if (important) {
+		newsPopped.add(important.id);
+		notify(important.title, [{ label: "Read", run: openNews }, { label: "Later" }], 0);
+	}
+}
+
+function updateNewsButton() {
+	newsBtn.hidden = announcements.length === 0;
+	newsDot.hidden = !announcements.some((a) => !newsSeen.has(a.id));
+}
+
+function formatDay(value) {
+	const date = new Date(value);
+	if (isNaN(date)) return "";
+	return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function renderNews() {
+	newsList.textContent = "";
+	if (!announcements.length) {
+		const empty = document.createElement("p");
+		empty.className = "news-empty";
+		empty.textContent = "Nothing new right now.";
+		newsList.append(empty);
+		return;
+	}
+	for (const a of announcements) {
+		const item = document.createElement("article");
+		item.className = "news-item" + (a.important ? " important" : "");
+
+		const meta = document.createElement("div");
+		meta.className = "news-meta";
+		const day = document.createElement("span");
+		day.textContent = formatDay(a.date);
+		meta.append(day);
+		if (!newsSeen.has(a.id)) {
+			const tag = document.createElement("span");
+			tag.className = "news-tag";
+			tag.textContent = "New";
+			meta.append(tag);
+		}
+
+		const title = document.createElement("h3");
+		title.textContent = a.title;
+		const message = document.createElement("p");
+		message.textContent = a.message;
+		item.append(meta, title, message);
+
+		const link = a.link && safeLink(a.link);
+		if (link) {
+			const btn = document.createElement("button");
+			btn.type = "button";
+			btn.className = "pill-btn";
+			btn.textContent = `Open ${hostOf(link)}`;
+			btn.addEventListener("click", () => {
+				newsDialog.close();
+				openInNewTab(link);
+			});
+			item.append(btn);
+		}
+		newsList.append(item);
+	}
+}
+
+function openNews() {
+	renderNews();
+	newsDialog.showModal();
+	raiseTrail();
+	// Everything shown now counts as read (the "New" tags stay until next time).
+	for (const a of announcements) newsSeen.add(a.id);
+	writeList(NEWS_SEEN_KEY, [...newsSeen].slice(-100));
+	updateNewsButton();
+}
+
+newsBtn.addEventListener("click", openNews);
+newsDialog.addEventListener("click", (event) => {
+	if (event.target === newsDialog) newsDialog.close();
+});
+
+loadAnnouncements();
+// New ones show up without reloading, while Slow is on screen.
+setInterval(() => {
+	if (!document.hidden) loadAnnouncements();
+}, 10 * 60_000);
+
+/* ============================================================
+   DEV MODE (for Slow's developers only)
+   Unlocks only with a GitHub token that can push to Slow's repository, and GitHub checks
+   that, not this page, so finding this menu isn't enough to post anything. The token is
+   kept in memory only (never saved), because websites opened through Slow share its
+   address and storage.
+   ============================================================ */
+
+const DEV_REPO = "dreammidnight27/Slow";
+const NEWS_PATH = "public/announcements.json";
+
+const devDialog = document.getElementById("dev");
+const devBadge = document.getElementById("dev-badge");
+const devUnlockForm = document.getElementById("dev-unlock");
+const devTokenInput = document.getElementById("dev-token");
+const devUnlockNote = document.getElementById("dev-unlock-note");
+const devPanel = document.getElementById("dev-panel");
+const newsForm = document.getElementById("news-form");
+const newsNote = document.getElementById("news-note");
+const devNews = document.getElementById("dev-news");
+const devInfo = document.getElementById("dev-info");
+
+document.getElementById("dev-repo-name").textContent = DEV_REPO;
+
+let devToken = null;
+let devLogin = "";
+
+async function github(path, options = {}, token = devToken) {
+	const res = await fetch(`https://api.github.com/repos/${DEV_REPO}${path}`, {
+		...options,
+		cache: "no-store",
+		headers: {
+			Accept: "application/vnd.github+json",
+			Authorization: `Bearer ${token}`,
+			...(options.body ? { "Content-Type": "application/json" } : {}),
+		},
+	});
+	const data = await res.json().catch(() => ({}));
+	if (!res.ok) {
+		const error = new Error(data.message || `GitHub said ${res.status}`);
+		error.status = res.status;
+		throw error;
+	}
+	return data;
+}
+
+const toBase64 = (text) => {
+	let binary = "";
+	for (const byte of new TextEncoder().encode(text)) binary += String.fromCharCode(byte);
+	return btoa(binary);
+};
+const fromBase64 = (b64) => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, "")), (c) => c.charCodeAt(0)));
+
+function openDev() {
+	if (palette.open) palette.close();
+	if (settingsDialog.open) settingsDialog.close();
+	showDevView();
+	devDialog.showModal();
+	raiseTrail();
+	if (devToken) {
+		refreshDevPanel();
+		document.getElementById("news-title-input").focus();
+	} else {
+		devTokenInput.focus();
+	}
+}
+
+function showDevView() {
+	devUnlockForm.hidden = Boolean(devToken);
+	devPanel.hidden = !devToken;
+	devBadge.hidden = !devToken;
+	document.getElementById("dev-title").textContent = devToken ? `Dev mode · ${devLogin}` : "Dev mode";
+}
+
+devUnlockForm.addEventListener("submit", async (event) => {
+	event.preventDefault();
+	const token = devTokenInput.value.trim();
+	if (!token) return;
+	devUnlockNote.textContent = "Checking with GitHub…";
+	try {
+		const repo = await github("", {}, token);
+		if (!repo.permissions?.push) {
+			devUnlockNote.textContent = "That token works, but it can't edit Slow's repository, so dev mode stays locked.";
+			return;
+		}
+		devToken = token;
+		devLogin = (await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${token}` } })
+			.then((r) => r.json())
+			.catch(() => ({}))).login || "dev";
+	} catch (err) {
+		devUnlockNote.textContent =
+			err.status === 401 ? "GitHub didn't accept that token." : `Couldn't check the token: ${err.message}`;
+		return;
+	}
+	devTokenInput.value = "";
+	devUnlockNote.textContent = "";
+	showDevView();
+	refreshDevPanel();
+});
+
+function lockDev() {
+	devToken = null;
+	devLogin = "";
+	showDevView();
+	devDialog.close();
+	notify("Dev mode is locked.");
+}
+
+/* ---------- announcements, straight from the repository ---------- */
+
+async function readNewsFile() {
+	try {
+		const file = await github(`/contents/${NEWS_PATH}?ref=main`);
+		const list = JSON.parse(fromBase64(file.content)).announcements;
+		return { list: Array.isArray(list) ? list : [], sha: file.sha };
+	} catch (err) {
+		if (err.status === 404) return { list: [], sha: undefined };
+		throw err;
+	}
+}
+
+async function writeNewsFile(list, sha, message) {
+	const content = JSON.stringify({ announcements: list }, null, "\t") + "\n";
+	await github(`/contents/${NEWS_PATH}`, {
+		method: "PUT",
+		body: JSON.stringify({ message, content: toBase64(content), sha, branch: "main" }),
+	});
+	announcements = liveAnnouncements(list);
+	updateNewsButton();
+}
+
+function explainGithubError(err) {
+	if (err.status === 409 || err.status === 422) return "The announcements changed on GitHub just now. Try again.";
+	if (err.status === 401) return "GitHub stopped accepting the token. Lock dev mode and unlock it again.";
+	return `GitHub said: ${err.message}`;
+}
+
+async function renderDevNews() {
+	devNews.textContent = "Loading…";
+	let list;
+	try {
+		({ list } = await readNewsFile());
+	} catch (err) {
+		devNews.textContent = explainGithubError(err);
+		return;
+	}
+	devNews.textContent = "";
+	const shown = liveAnnouncements(list);
+	if (!shown.length) {
+		devNews.textContent = "Nothing posted.";
+		return;
+	}
+	for (const a of shown) {
+		const row = document.createElement("div");
+		row.className = "dev-news-row";
+		const title = document.createElement("span");
+		title.textContent = a.title;
+		const when = document.createElement("small");
+		when.textContent = (a.important ? "Pop-up · " : "") + formatDay(a.date) + (a.expires ? ` – ${formatDay(a.expires)}` : "");
+		const remove = document.createElement("button");
+		remove.type = "button";
+		remove.className = "pill-btn danger";
+		remove.textContent = "Remove";
+		remove.addEventListener("click", async () => {
+			if (!window.confirm(`Remove “${a.title}” for everyone?`)) return;
+			remove.disabled = true;
+			try {
+				const { list: current, sha } = await readNewsFile();
+				await writeNewsFile(current.filter((x) => x.id !== a.id), sha, `Remove announcement: ${a.title}`);
+				notify("Removed. It disappears for everyone in about a minute.");
+			} catch (err) {
+				notify(explainGithubError(err));
+			}
+			renderDevNews();
+		});
+		row.append(title, when, remove);
+		devNews.append(row);
+	}
+}
+
+newsForm.addEventListener("submit", async (event) => {
+	event.preventDefault();
+	const title = document.getElementById("news-title-input").value.trim();
+	const message = document.getElementById("news-message").value.trim();
+	const linkText = document.getElementById("news-link").value.trim();
+	const days = Number(document.getElementById("news-days").value);
+	const important = document.getElementById("news-important").checked;
+
+	if (!title || !message) {
+		newsNote.textContent = "Add a title and a message.";
+		return;
+	}
+	const link = linkText ? safeLink(/^[a-z]+:/i.test(linkText) ? linkText : `https://${linkText}`) : null;
+	if (linkText && !link) {
+		newsNote.textContent = "That link doesn't look right.";
+		return;
+	}
+
+	const now = new Date();
+	const item = {
+		id: now.getTime().toString(36),
+		title,
+		message,
+		...(link ? { link } : {}),
+		important,
+		date: now.toISOString(),
+		...(days ? { expires: new Date(now.getTime() + days * 86_400_000).toISOString() } : {}),
+	};
+
+	const submit = newsForm.querySelector("[type=submit]");
+	submit.disabled = true;
+	newsNote.textContent = "Posting…";
+	try {
+		const { list, sha } = await readNewsFile();
+		await writeNewsFile([item, ...liveAnnouncements(list)], sha, `Announcement: ${title}`);
+		newsForm.reset();
+		newsNote.textContent = "Posted. Everyone sees it in about a minute, once GitHub Pages updates.";
+	} catch (err) {
+		newsNote.textContent = explainGithubError(err);
+	}
+	submit.disabled = false;
+	renderDevNews();
+});
+
+/* ---------- diagnostics and tools ---------- */
+
+async function renderDevInfo(extra = {}) {
+	const storage = await navigator.storage?.estimate?.().catch(() => null);
+	const covers = await caches
+		.open(COVER_CACHE)
+		.then((c) => c.keys())
+		.then((k) => k.length)
+		.catch(() => "?");
+	const rows = {
+		"Wisp server": settings.wispUrl || defaultWispUrl(),
+		Connection: extra.connection || "not tested",
+		"Service worker": navigator.serviceWorker?.controller ? "running" : "not running",
+		Isolated: crossOriginIsolated ? "yes" : "no",
+		Tabs: `${tabs.length} open, ${tabs.filter((t) => t.frame).length} loaded`,
+		"Storage used": storage ? `${(storage.usage / 1048576).toFixed(1)} MB` : "?",
+		"Game pictures": `${covers} saved`,
+		Announcements: `${announcements.length} showing`,
+	};
+	devInfo.textContent = "";
+	for (const [name, value] of Object.entries(rows)) {
+		const dt = document.createElement("dt");
+		dt.textContent = name;
+		const dd = document.createElement("dd");
+		dd.textContent = value;
+		devInfo.append(dt, dd);
+	}
+}
+
+function refreshDevPanel() {
+	renderDevNews();
+	renderDevInfo();
+}
+
+document.getElementById("dev-test").addEventListener("click", async (event) => {
+	const btn = event.currentTarget;
+	btn.disabled = true;
+	renderDevInfo({ connection: "testing…" });
+	const start = performance.now();
+	const works = await connectionWorks();
+	const ms = Math.round(performance.now() - start);
+	renderDevInfo({ connection: works ? `working (${ms} ms)` : "not working" });
+	btn.disabled = false;
+});
+
+document.getElementById("dev-reconnect").addEventListener("click", async (event) => {
+	try {
+		await reconnect();
+		confirmOnButton(event.currentTarget, "Reconnected");
+	} catch {
+		confirmOnButton(event.currentTarget, "Failed");
+	}
+});
+
+document.getElementById("dev-covers").addEventListener("click", async (event) => {
+	await caches.delete(COVER_CACHE);
+	confirmOnButton(event.currentTarget, "Cleared");
+	renderDevInfo();
+});
+
+document.getElementById("dev-update").addEventListener("click", async () => {
+	await (await navigator.serviceWorker?.getRegistration())?.update().catch(() => {});
+	location.reload();
+});
+
+document.getElementById("dev-lock").addEventListener("click", lockDev);
+document.getElementById("dev-close").addEventListener("click", () => devDialog.close());
+devBadge.addEventListener("click", openDev);
+devDialog.addEventListener("click", (event) => {
+	if (event.target === devDialog) devDialog.close();
+});
+
+/* ============================================================
    REOPEN CLOSED TABS
    ============================================================ */
 
@@ -2417,6 +2848,8 @@ function paletteActions() {
 			},
 		},
 		{ label: "Settings", run: openSettings },
+		announcements.length && { label: "Announcements", run: openNews },
+		devToken && { label: "Dev mode", detail: devLogin, run: openDev },
 		{ label: "Surprise me with a theme", run: surprise },
 		...[...THEMES, CUSTOM_THEME].map((t) => ({ label: `Theme: ${t.name}`, run: () => applyTheme(t.id) })),
 		{
@@ -2515,7 +2948,9 @@ function buildPaletteItems(query) {
 	for (const g of loadedSourceGames()) {
 		games.push({ kind: "game", icon: "🎮", label: `Play ${g.name}`, detail: g.from, hint: "Game", run: () => openGame(g) });
 	}
-	const all = [...openTabs, ...paletteActions(), ...saved, ...games, ...history].filter(matches);
+	// Dev mode isn't listed anywhere; it only shows up when you type "dev".
+	const dev = !devToken && /\bdev/i.test(q) ? [{ kind: "action", label: "Dev mode", detail: "For Slow's developers", run: openDev }] : [];
+	const all = [...dev, ...openTabs, ...paletteActions(), ...saved, ...games, ...history].filter(matches);
 	const strong = all.filter((item) => item.label.toLowerCase().startsWith(words[0]));
 	const rest = all.filter((item) => !strong.includes(item));
 	return [...strong, go, ...rest].slice(0, 40);

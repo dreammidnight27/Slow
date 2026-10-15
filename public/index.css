@@ -1471,7 +1471,8 @@ body {
 	}
 }
 
-#settings-form {
+#settings-form,
+.panel-form {
 	display: flex;
 	flex-direction: column;
 	max-height: inherit;
@@ -1599,7 +1600,8 @@ body {
 }
 
 .settings select,
-.settings input[type="text"] {
+.settings input[type="text"],
+.settings input[type="password"] {
 	height: 36px;
 	padding: 0 12px;
 	border: 1px solid var(--line);
@@ -1622,7 +1624,8 @@ body {
 
 .setting input:focus-visible,
 .settings select:focus-visible,
-.settings input[type="text"]:focus {
+.settings input[type="text"]:focus,
+.settings input[type="password"]:focus {
 	outline: 2px solid var(--aurora);
 	outline-offset: 2px;
 }
@@ -2941,4 +2944,239 @@ img.game-cover.waiting {
 	.tab-icon {
 		margin-right: 7px;
 	}
+}
+
+/* ============================================================
+   ANNOUNCEMENTS AND DEV MODE
+   ============================================================ */
+
+#btn-news {
+	position: relative;
+}
+
+.news-dot {
+	position: absolute;
+	top: 7px;
+	right: 7px;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--aurora);
+	box-shadow: 0 0 0 2px var(--void);
+}
+
+:root[data-motion="full"] .news-dot {
+	animation: news-pulse 2.4s var(--ease-in-out) infinite;
+}
+
+@keyframes news-pulse {
+	50% {
+		box-shadow:
+			0 0 0 2px var(--void),
+			0 0 0 6px color-mix(in srgb, var(--aurora) 0%, transparent);
+		transform: scale(1.15);
+	}
+}
+
+.news-list {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding-top: 18px;
+}
+
+.news-item {
+	padding: 16px 18px;
+	border: 1px solid var(--line);
+	border-radius: 14px;
+	background: var(--glass);
+}
+
+.news-item.important {
+	border-color: color-mix(in srgb, var(--aurora) 45%, transparent);
+	background: color-mix(in srgb, var(--aurora) 9%, transparent);
+}
+
+.news-meta {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	font-size: 12px;
+	color: rgba(238, 240, 255, 0.5);
+}
+
+.news-tag {
+	padding: 1px 8px;
+	border-radius: 9px;
+	background: color-mix(in srgb, var(--aurora) 20%, transparent);
+	color: var(--ember);
+	font-size: 11px;
+	font-weight: 600;
+}
+
+.news-item h3 {
+	margin: 6px 0 4px;
+	color: var(--starlight);
+	font-size: 16px;
+	font-weight: 600;
+	letter-spacing: 0;
+	text-transform: none;
+}
+
+.news-item p {
+	margin: 0;
+	font-size: 14px;
+	line-height: 1.5;
+	color: rgba(238, 240, 255, 0.82);
+	white-space: pre-line;
+	overflow-wrap: anywhere;
+}
+
+.news-item .pill-btn {
+	margin-top: 12px;
+}
+
+.news-empty {
+	margin: 12px 0 4px;
+	text-align: center;
+	color: rgba(238, 240, 255, 0.5);
+	font-size: 14px;
+}
+
+.dev-badge {
+	flex: none;
+	align-self: center;
+	margin: 0 6px 0 -4px;
+	padding: 2px 7px;
+	border: 1px solid color-mix(in srgb, var(--aurora) 55%, transparent);
+	border-radius: 7px;
+	background: color-mix(in srgb, var(--aurora) 14%, transparent);
+	color: var(--ember);
+	font: 600 10.5px/1.4 ui-monospace, "Cascadia Code", Consolas, monospace;
+	letter-spacing: 0.08em;
+	cursor: pointer;
+}
+
+.dev-badge[hidden] {
+	display: none;
+}
+
+.dev-intro {
+	margin: 0 0 12px;
+	font-size: 14px;
+	line-height: 1.5;
+	color: rgba(238, 240, 255, 0.8);
+}
+
+.dev-fine {
+	display: block;
+	margin-top: 10px;
+}
+
+.dev-form {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding-top: 6px;
+}
+
+.dev-form textarea,
+.dev-form select {
+	padding: 10px 14px;
+	border: 1px solid rgba(238, 240, 255, 0.12);
+	border-radius: 12px;
+	background: rgba(238, 240, 255, 0.05);
+	color: var(--starlight);
+	font: inherit;
+	font-size: 14px;
+	outline: none;
+	resize: vertical;
+}
+
+.dev-form select {
+	height: 40px;
+	padding: 0 12px;
+}
+
+.dev-form textarea:focus,
+.dev-form select:focus {
+	border-color: var(--aurora);
+}
+
+.dev-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	gap: 14px;
+}
+
+.dev-check {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 40px;
+	font-size: 13.5px;
+	color: rgba(238, 240, 255, 0.8);
+	cursor: pointer;
+}
+
+.dev-check input {
+	width: 16px;
+	height: 16px;
+	accent-color: var(--aurora);
+}
+
+.dev-news {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding-top: 6px;
+}
+
+.dev-news-row {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 10px 12px;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	font-size: 13.5px;
+}
+
+.dev-news-row span {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.dev-news-row small {
+	color: rgba(238, 240, 255, 0.45);
+}
+
+.dev-news-row .pill-btn {
+	height: 30px;
+	padding: 0 12px;
+}
+
+.dev-info {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 6px 16px;
+	margin: 6px 0 12px;
+	font-size: 13px;
+}
+
+.dev-info dt {
+	color: rgba(238, 240, 255, 0.5);
+}
+
+.dev-info dd {
+	margin: 0;
+	min-width: 0;
+	overflow-wrap: anywhere;
+	font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+	font-size: 12.5px;
 }

@@ -75,7 +75,10 @@ async function handleRequest(event) {
 	await cookiesLoaded;
 	if (scramjet.route(event)) {
 		if (event.request.method === "HEAD") return headRequest(event);
-		return scramjet.fetch(event);
+		const response = await scramjet.fetch(event);
+		// Scramjet's "couldn't load" page skips the hook below that adds isolation headers, so the
+		// browser blocked it: a blank tab, which Slow also couldn't read to reconnect and retry.
+		return ["document", "iframe"].includes(event.request.destination) ? isolated(response) : response;
 	}
 	if (isCover(event.request)) return coverRequest(event.request);
 	const response = await fetch(fresh(event.request));
@@ -208,14 +211,17 @@ scramjet.addEventListener("request", (event) => {
 // Saving only happens when something actually changed.
 scramjet.addEventListener("handleResponse", saveCookiesSoon);
 
-scramjet.addEventListener("handleResponse", (event) => {
-	if (event.destination !== "document" && event.destination !== "iframe") return;
+// Slow's page is "cross-origin isolated", so pages shown inside it, and workers they start, must
+// say they agree to that, or the browser blocks them (reCAPTCHA's worker was, breaking its check).
+// Scramjet only adds this when the worker itself is isolated, which isn't the case on hosts
+// like GitHub Pages, so it's added here every time.
+const ISOLATED_KINDS = ["document", "iframe", "worker", "sharedworker"];
 
-	// Slow's page is "cross-origin isolated", so pages shown inside it must say they agree to that.
-	// Scramjet only adds this when the worker itself is isolated, which isn't the case on hosts
-	// like GitHub Pages, so it's added here every time.
+scramjet.addEventListener("handleResponse", (event) => {
+	if (!ISOLATED_KINDS.includes(event.destination)) return;
 	event.responseHeaders["Cross-Origin-Embedder-Policy"] = "require-corp";
 	event.responseHeaders["Cross-Origin-Opener-Policy"] = "same-origin";
+	if (event.destination !== "document" && event.destination !== "iframe") return;
 
 	if (typeof event.responseBody !== "string") return;
 

@@ -48,8 +48,9 @@
 		<line x1="397" y1="306" x2="493" y2="306" />
 		<line x1="397" y1="370" x2="493" y2="370" />
 	</g>
-	
+
 </svg><span class="brand-word"><span class="brand-text">Slow</span></span></div>
+					<button id="dev-badge" class="dev-badge" type="button" title="Dev mode is on" hidden>DEV</button>
 					<div id="tab-strip" role="tablist" aria-label="Open tabs"></div>
 					<button id="new-tab" class="icon-btn" type="button" aria-label="New tab"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button>
 					<button id="btn-games" class="icon-btn" type="button" aria-label="Games" title="Games" aria-haspopup="true" aria-expanded="false" aria-controls="games-menu">
@@ -67,6 +68,7 @@
 					<button id="btn-forward" class="icon-btn" type="button" aria-label="Forward"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg></button>
 					<button id="btn-reload" class="icon-btn" type="button" aria-label="Reload"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9" /><path d="M20 4.5V9h-4.5" /></svg></button>
 					<button id="btn-settings" class="icon-btn" type="button" aria-label="Settings" aria-haspopup="dialog"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.18 10.22L21.49 10.57L21.49 13.43L19.18 13.78L18.34 15.82L19.72 17.70L17.70 19.72L15.82 18.34L13.78 19.18L13.43 21.49L10.57 21.49L10.22 19.18L8.18 18.34L6.30 19.72L4.28 17.70L5.66 15.82L4.82 13.78L2.51 13.43L2.51 10.57L4.82 10.22L5.66 8.18L4.28 6.30L6.30 4.28L8.18 5.66L10.22 4.82L10.57 2.51L13.43 2.51L13.78 4.82L15.82 5.66L17.70 4.28L19.72 6.30L18.34 8.18Z" /><circle cx="12" cy="12" r="3" /></svg></button>
+					<button id="btn-news" class="icon-btn" type="button" aria-label="Announcements" title="Announcements" aria-haspopup="dialog" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15Z" /><path d="M10 20.5a2 2 0 0 0 4 0" /></svg><span class="news-dot" hidden></span></button>
 					<form id="sj-form">
 						<input
 							id="sj-address"
@@ -266,6 +268,80 @@
 					<button type="submit" class="pill-btn">Add</button>
 				</div>
 			</form>
+		</dialog>
+
+		<dialog id="news" class="settings" aria-labelledby="news-title">
+			<form method="dialog" class="panel-form">
+				<header class="settings-head">
+					<h2 id="news-title">Announcements</h2>
+					<button class="icon-btn" value="close" aria-label="Close announcements">&times;</button>
+				</header>
+				<div id="news-list" class="settings-body news-list"></div>
+			</form>
+		</dialog>
+
+		<!-- Dev mode: only unlocks with a GitHub token that can edit Slow's repository -->
+		<dialog id="dev" class="settings" aria-labelledby="dev-title">
+			<div class="panel-form">
+				<header class="settings-head">
+					<h2 id="dev-title">Dev mode</h2>
+					<button id="dev-close" class="icon-btn" type="button" aria-label="Close dev mode">&times;</button>
+				</header>
+
+				<form id="dev-unlock" class="settings-body" novalidate>
+					<section>
+						<p class="dev-intro">Dev mode is for Slow's developers. Paste a GitHub token that can edit <strong id="dev-repo-name"></strong> to unlock it.</p>
+						<div class="inline-field">
+							<input id="dev-token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…" aria-label="GitHub token" />
+							<button class="pill-btn primary" type="submit">Unlock</button>
+						</div>
+						<p id="dev-unlock-note" class="setting-note" role="status"></p>
+						<p class="setting-hint dev-fine">The token stays in this tab's memory only, and is forgotten when Slow is closed or reloaded.</p>
+					</section>
+				</form>
+
+				<div id="dev-panel" class="settings-body" hidden>
+					<section>
+						<h3>Post an announcement</h3>
+						<form id="news-form" class="dev-form" novalidate>
+							<label class="mini-field"><span>Title</span><input id="news-title-input" type="text" maxlength="80" autocomplete="off" /></label>
+							<label class="mini-field"><span>Message</span><textarea id="news-message" rows="4" maxlength="600"></textarea></label>
+							<label class="mini-field"><span>Link <em>(optional)</em></span><input id="news-link" type="text" autocomplete="off" spellcheck="false" placeholder="https://…" /></label>
+							<div class="dev-row">
+								<label class="mini-field"><span>Show for</span>
+									<select id="news-days">
+										<option value="0">Until removed</option>
+										<option value="1">1 day</option>
+										<option value="3">3 days</option>
+										<option value="7">1 week</option>
+										<option value="30">1 month</option>
+									</select>
+								</label>
+								<label class="dev-check"><input id="news-important" type="checkbox" /> Pop up when people open Slow</label>
+							</div>
+							<p id="news-note" class="setting-note" role="status"></p>
+							<div class="mini-actions"><button class="pill-btn primary" type="submit">Post to everyone</button></div>
+						</form>
+					</section>
+
+					<section>
+						<h3>Posted</h3>
+						<div id="dev-news" class="dev-news"></div>
+					</section>
+
+					<section>
+						<h3>Diagnostics</h3>
+						<dl id="dev-info" class="dev-info"></dl>
+						<div class="data-actions">
+							<button id="dev-test" class="pill-btn" type="button">Test connection</button>
+							<button id="dev-reconnect" class="pill-btn" type="button">Reconnect</button>
+							<button id="dev-covers" class="pill-btn" type="button">Clear game pictures</button>
+							<button id="dev-update" class="pill-btn" type="button">Update Slow now</button>
+							<button id="dev-lock" class="pill-btn danger" type="button">Lock dev mode</button>
+						</div>
+					</section>
+				</div>
+			</div>
 		</dialog>
 
 		<dialog id="settings" class="settings" aria-labelledby="settings-title">
