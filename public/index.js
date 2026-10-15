@@ -30,6 +30,8 @@ const DEFAULT_SETTINGS = {
 	suggestions: true,
 	searchSuggestions: true,
 	warnOnLeave: false,
+	// Stops ads (and YouTube's video ads) on websites.
+	blockAds: true,
 	// Follows the system's "reduce motion" setting until changed here.
 	reduceMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
 	stars: true,
@@ -972,7 +974,22 @@ function writeList(key, list) {
 
 let recent = readList(RECENT_KEY);
 // (Older versions saved shortcuts as http:// addresses; https is faster through the proxy.)
-let shortcuts = readList(SHORTCUT_KEY).map((s) => ({ ...s, url: String(s.url).replace(/^http:\/\//, "https://") }));
+// What the new tab page starts with, until you add or remove one of your own.
+const STARTER_SHORTCUTS = [
+	{ url: "https://www.youtube.com/", title: "YouTube" },
+	{ url: "https://www.tiktok.com/", title: "TikTok" },
+	{ url: "https://github.com/", title: "GitHub" },
+];
+const savedShortcuts = (() => {
+	try {
+		return localStorage.getItem(SHORTCUT_KEY) !== null;
+	} catch {
+		return false;
+	}
+})();
+let shortcuts = savedShortcuts
+	? readList(SHORTCUT_KEY).map((s) => ({ ...s, url: String(s.url).replace(/^http:\/\//, "https://") }))
+	: STARTER_SHORTCUTS.map((s) => ({ ...s }));
 
 /* ---------- recent sites ---------- */
 
@@ -1008,7 +1025,8 @@ function showSiteIcon(letterEl, url) {
 	img.decoding = "async";
 	img.addEventListener("load", () => {
 		letterEl.classList.add("has-icon");
-		letterEl.append(img);
+		// (the letter goes: even invisible, it took up room and pushed the icon off center)
+		letterEl.replaceChildren(img);
 	});
 	img.addEventListener("error", () => {
 		const next = sources.shift();
@@ -1988,7 +2006,15 @@ function applySettings() {
 	shortcutsEl.closest(".quick-group").classList.toggle("hidden", !settings.showShortcuts);
 	if (!settings.suggestions) hideSuggest();
 	refreshDarkMode();
+	syncAdblock();
 }
+
+// Websites look up to this page for the setting (adblock.js); the service worker is told directly.
+function syncAdblock() {
+	window.__slowBlockAds = settings.blockAds;
+	navigator.serviceWorker?.controller?.postMessage({ type: "adblock", on: settings.blockAds });
+}
+navigator.serviceWorker?.addEventListener("controllerchange", syncAdblock);
 
 // Shows the saved values in the panel's controls.
 function fillSettingsForm() {
@@ -4102,6 +4128,16 @@ gamesBtn.addEventListener("click", (event) => {
 });
 
 document.getElementById("games-close").addEventListener("click", () => setGamesMenu(false));
+
+// The movies and music buttons next to games on the new tab page.
+// (Aether's own /noads page turns its ads off, saves that, and goes on to its home page.)
+const HOME_APPS = {
+	"btn-movies": "https://aether.st/noads",
+	"btn-music": "https://open.spotify.com/",
+};
+for (const [id, url] of Object.entries(HOME_APPS)) {
+	document.getElementById(id).addEventListener("click", () => navigate(activeTab(), url));
+}
 
 gamesFilter.addEventListener("input", () => {
 	renderGames();

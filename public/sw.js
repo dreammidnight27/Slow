@@ -70,9 +70,82 @@ function saveCookiesSoon() {
 	}, 500);
 }
 
+/* ---------- ad blocker ----------
+   Requests to ad servers get an empty answer instead of going out. (adblock.js, added to every
+   page below, handles YouTube and ad boxes.) Slow's page tells this worker whether "Block ads"
+   is on, and it's kept in a small cache so a restarted worker still knows. */
+
+// Each blocks the address and everything under it (doubleclick.net also blocks ad.doubleclick.net).
+const AD_HOSTS = new Set([
+	"doubleclick.net", "googlesyndication.com", "googleadservices.com", "adservice.google.com",
+	"googletagservices.com", "amazon-adsystem.com", "adnxs.com", "adsrvr.org", "criteo.com", "criteo.net",
+	"taboola.com", "outbrain.com", "pubmatic.com", "rubiconproject.com", "openx.net", "casalemedia.com",
+	"smartadserver.com", "yieldmo.com", "sharethrough.com", "teads.tv", "media.net", "moatads.com",
+	"adform.net", "bidswitch.net", "3lift.com", "triplelift.com", "indexww.com", "contextweb.com",
+	"advertising.com", "adcolony.com", "popads.net", "popcash.net", "propellerads.com", "adsterra.com",
+	"exoclick.com", "exosrv.com", "juicyads.com", "trafficjunky.net", "hilltopads.net", "a-ads.com",
+	"mgid.com", "revcontent.com", "zedo.com", "adroll.com", "adsafeprotected.com", "doubleverify.com",
+	"serving-sys.com", "flashtalking.com", "ads-twitter.com", "adeventtracker.spotify.com",
+]);
+
+function isAd(url) {
+	const parts = url.hostname.split(".");
+	for (let i = 0; i < parts.length - 1; i++) {
+		if (AD_HOSTS.has(parts.slice(i).join("."))) return true;
+	}
+	const host = url.hostname;
+	const path = url.pathname;
+	// YouTube's ad requests come from its own address.
+	if (/(^|\.)youtube\.com$/.test(host) && /^\/(pagead|api\/stats\/ads|ptracking)\b/.test(path)) return true;
+	// So do Spotify's.
+	if (/(^|\.)spotify\.com$/.test(host) && /^\/(ads|ad-logic)\//.test(path)) return true;
+	return false;
+}
+
+/* ---------- websites in English ----------
+   Sites pick a language from the "preferred language" a browser sends, and often from where
+   the connection comes from. Every request asks for English; english.js (added to every page
+   below) tells page scripts the browser's language is English too. */
+
+const ENGLISH = "en-US,en;q=0.9";
+
+scramjet.addEventListener("request", (event) => {
+	event.requestHeaders["accept-language"] = ENGLISH;
+	// Google goes by location more than anything else, unless the address says otherwise.
+	const { hostname, searchParams } = event.url;
+	const google = /(^|\.)google\.[a-z.]+$/.test(hostname) || /(^|\.)youtube\.com$/.test(hostname);
+	const page = event.destination === "document" || event.destination === "iframe";
+	if (google && page && event.method === "GET" && !searchParams.has("hl")) {
+		searchParams.set("hl", "en");
+	}
+});
+
+const FLAGS_CACHE = "slow-flags";
+let blockAds = true;
+const flagsLoaded = caches
+	.open(FLAGS_CACHE)
+	.then((cache) => cache.match("adblock"))
+	.then((saved) => saved?.text())
+	.then((value) => {
+		if (value) blockAds = value === "on";
+	})
+	.catch(() => {});
+
+scramjet.addEventListener("request", (event) => {
+	if (!blockAds || !isAd(event.url)) return;
+	const page = event.destination === "document" || event.destination === "iframe";
+	const empty = new Response(page ? "" : null, {
+		status: page ? 200 : 204,
+		headers: page ? { "content-type": "text/html" } : {},
+	});
+	empty.rawHeaders = page ? { "content-type": "text/html" } : {};
+	event.response = Promise.resolve(empty);
+});
+
 async function handleRequest(event) {
 	await scramjet.loadConfig();
 	await cookiesLoaded;
+	await flagsLoaded;
 	if (scramjet.route(event)) {
 		if (event.request.method === "HEAD") return headRequest(event);
 		const response = await scramjet.fetch(event);
@@ -161,6 +234,10 @@ const SCRAMJET_SCRIPTS =
 // Slow's per-tab volume control, added right after Scramjet's scripts so it's in place
 // before the page's own scripts make any sound. (A full address, so a page's <base> can't move it.)
 const TAB_VOLUME_SCRIPT = `<script src="${new URL("tab-volume.js", self.location.href).href}"></script>`;
+// ...and the ad blocker's page part, for the same reason (it must be in place before the page's scripts).
+const ADBLOCK_SCRIPT = `<script src="${new URL("adblock.js", self.location.href).href}"></script>`;
+// ...and English for page scripts (see "websites in English" above).
+const ENGLISH_SCRIPT = `<script src="${new URL("english.js", self.location.href).href}"></script>`;
 
 // UGS games are single web pages kept on jsDelivr, which sends them labelled as plain text,
 // so they'd show as code. Scramjet only adapts pages labelled as web pages (before any later
@@ -229,7 +306,7 @@ scramjet.addEventListener("handleResponse", (event) => {
 	const injected = html.match(SCRAMJET_SCRIPTS);
 	if (!injected) return;
 
-	const ours = injected[0] + TAB_VOLUME_SCRIPT;
+	const ours = injected[0] + TAB_VOLUME_SCRIPT + ADBLOCK_SCRIPT + ENGLISH_SCRIPT;
 	const firstScript = html.search(/<script[\s>]/i);
 
 	if (firstScript === -1 || firstScript >= injected.index) {
@@ -258,4 +335,11 @@ self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim(
 // (it otherwise keeps the first settings it loaded until the browser restarts it).
 self.addEventListener("message", (event) => {
 	if (event.data === "reload-config") scramjet.config = null;
+	if (event.data?.type === "adblock") {
+		blockAds = event.data.on !== false;
+		caches
+			.open(FLAGS_CACHE)
+			.then((cache) => cache.put("adblock", new Response(blockAds ? "on" : "off")))
+			.catch(() => {});
+	}
 });
