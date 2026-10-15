@@ -389,7 +389,7 @@ body {
 }
 
 .logo {
-	width: clamp(110px, 20vh, 170px);
+	width: clamp(84px, 15vh, 128px);
 	overflow: visible;
 	filter: drop-shadow(0 0 18px color-mix(in srgb, var(--moon-base) 45%, transparent)) drop-shadow(0 6px 28px color-mix(in srgb, var(--void) 70%, transparent));
 	animation: drift 14s ease-in-out infinite alternate;
@@ -1223,42 +1223,16 @@ body {
 	--moon-rim: #ffffff;
 }
 
-/* logo: crescent moon with a globe; the stars follow the theme */
-
-.logo .sparkle {
-	fill: var(--starlight);
-	filter: drop-shadow(0 0 3px var(--starlight));
-	transform-box: fill-box;
-	transform-origin: center;
-	animation: twinkle 3.2s ease-in-out infinite;
-}
-
-.logo .s2 {
-	animation-delay: 1.1s;
-}
-
-.logo .s3 {
-	animation-delay: 2.2s;
-}
-
-@keyframes twinkle {
-	50% {
-		opacity: 0.35;
-		transform: scale(0.8);
-	}
-}
-
-
-.brand-moon {
+.brand-logo {
 	position: relative;
 	z-index: 1; /* in front, so the word slides out from behind it */
-	width: 18px;
+	width: 20px;
 	height: 20px;
 	flex: none;
 	transition: transform var(--dur-mid) var(--ease-out);
 }
 
-/* The word "Slow" hides behind the moon, and slides out while you hover the logo. */
+/* The word "Slow" hides behind the globe, and slides out while you hover the logo. */
 .brand {
 	cursor: default;
 }
@@ -1294,8 +1268,12 @@ body {
 	transform: none;
 }
 
-.brand:hover .brand-moon {
+.brand:hover .brand-logo {
 	transform: rotate(-8deg);
+}
+
+.brand-logo .globe {
+	stroke: var(--moon-light);
 }
 
 /* the theme change flash */

@@ -4,8 +4,8 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>Slow</title>
-		<link rel="icon" href="favicon.svg" type="image/svg+xml" />
 		<link rel="icon" href="favicon.ico?v=2" sizes="any" />
+		<link rel="icon" href="favicon.svg?v=3" type="image/svg+xml" />
 
 		<script src="config.js"></script>
 		<script src="scram/scramjet.all.js"></script>
@@ -32,23 +32,13 @@
 		<div id="app">
 			<header class="chrome">
 				<div class="tabs-row">
-					<div class="brand" title="Slow"><svg class="brand-moon" viewBox="290 210 230 270" aria-hidden="true">
-	<defs>
-		<radialGradient id="brand-shade" gradientUnits="userSpaceOnUse" cx="480" cy="330" r="190">
-			<stop offset="0.6" style="stop-color: var(--moon-mid)" />
-			<stop offset="0.92" style="stop-color: var(--moon-light)" />
-		</radialGradient>
-	</defs>
-	<path d="M453.4 219.1A130 130 0 1 0 517.0 437.8A114 114 0 0 1 453.4 219.1Z" fill="url(#brand-shade)" />
-	<g class="globe" fill="none" stroke-width="10" style="stroke: var(--moon-base)">
-		<circle cx="445" cy="338" r="58" />
-		<ellipse cx="445" cy="338" rx="26" ry="58" />
-		<line x1="445" y1="280" x2="445" y2="396" />
-		<line x1="387" y1="338" x2="503" y2="338" />
-		<line x1="397" y1="306" x2="493" y2="306" />
-		<line x1="397" y1="370" x2="493" y2="370" />
+					<div class="brand" title="Slow"><svg class="brand-logo" viewBox="379 272 132 132" aria-hidden="true">
+	<g class="globe" fill="none" stroke-width="11" stroke-linecap="round">
+		<circle cx="445" cy="338" r="57" />
+		<ellipse class="meridian" cx="445" cy="338" rx="26" ry="57" />
+		<ellipse class="meridian m2" cx="445" cy="338" rx="0.5" ry="57" />
+		<line x1="388" y1="338" x2="502" y2="338" />
 	</g>
-
 </svg><span class="brand-word"><span class="brand-text">Slow</span></span></div>
 					<button id="dev-badge" class="dev-badge" type="button" title="Dev mode is on" hidden>DEV</button>
 					<div id="tab-strip" role="tablist" aria-label="Open tabs"></div>
@@ -89,71 +79,23 @@
 			<main id="viewport">
 				<div id="loadbar" aria-hidden="true"></div>
 				<section id="home" class="intro">
-					<svg class="logo" viewBox="270 206 280 340" aria-hidden="true" shape-rendering="geometricPrecision">
+					<svg class="logo" viewBox="373 266 144 144" aria-hidden="true" shape-rendering="geometricPrecision">
 						<defs>
-							<!-- base shading: dark toward the cavity, bright on the outer limb -->
-							<radialGradient id="logo-shade" gradientUnits="userSpaceOnUse" cx="480" cy="330" r="190">
-								<stop offset="0.52" style="stop-color: var(--moon-dark)" />
-								<stop offset="0.74" style="stop-color: var(--moon-mid)" />
-								<stop offset="0.9" style="stop-color: var(--moon-base)" />
-								<stop offset="1" style="stop-color: var(--moon-light)" />
-							</radialGradient>
-							<!-- key light from the upper left, falling off to the lower right -->
-							<linearGradient id="logo-key" gradientUnits="userSpaceOnUse" x1="310" y1="225" x2="520" y2="470">
-								<stop offset="0" stop-color="#fff" stop-opacity="0.38" />
-								<stop offset="0.45" stop-color="#fff" stop-opacity="0" />
-								<stop offset="0.7" stop-color="#0a0420" stop-opacity="0" />
-								<stop offset="1" stop-color="#0a0420" stop-opacity="0.45" />
-							</linearGradient>
-							<!-- thin rim light along the outer edge -->
-							<linearGradient id="logo-rim" gradientUnits="userSpaceOnUse" x1="330" y1="230" x2="470" y2="470">
-								<stop offset="0" stop-opacity="0.95" style="stop-color: var(--moon-rim)" />
-								<stop offset="0.55" stop-opacity="0.45" style="stop-color: var(--moon-light)" />
-								<stop offset="1" stop-opacity="0" style="stop-color: var(--moon-base)" />
-							</linearGradient>
-							<linearGradient id="logo-wire" gradientUnits="userSpaceOnUse" x1="395" y1="285" x2="500" y2="395">
-								<stop offset="0" style="stop-color: var(--moon-rim)" />
-								<stop offset="0.5" style="stop-color: var(--moon-base)" />
-								<stop offset="1" style="stop-color: var(--moon-mid)" />
-							</linearGradient>
-							<clipPath id="logo-clip">
-								<path d="M453.4 219.1A130 130 0 1 0 517.0 437.8A114 114 0 0 1 453.4 219.1Z" />
-							</clipPath>
 							<filter id="logo-soft" x="-50%" y="-50%" width="200%" height="200%">
 								<feGaussianBlur stdDeviation="5" />
 							</filter>
-							<filter id="logo-glow" x="-30%" y="-30%" width="160%" height="160%">
-								<feGaussianBlur in="SourceGraphic" stdDeviation="3.5" result="blur" />
-								<feMerge>
-									<feMergeNode in="blur" />
-									<feMergeNode in="SourceGraphic" />
-								</feMerge>
-							</filter>
 						</defs>
-						<path d="M453.4 219.1A130 130 0 1 0 517.0 437.8A114 114 0 0 1 453.4 219.1Z" fill="url(#logo-shade)" />
-						<g clip-path="url(#logo-clip)">
-							<!-- the globe casts a soft shadow onto the moon behind it -->
-							<circle cx="452" cy="346" r="62" fill="#05020f" opacity="0.45" filter="url(#logo-soft)" />
-							<path d="M453.4 219.1A130 130 0 1 0 517.0 437.8A114 114 0 0 1 453.4 219.1Z" fill="url(#logo-key)" />
-							<path d="M453.4 219.1A130 130 0 1 0 517.0 437.8" fill="none" stroke="url(#logo-rim)" stroke-width="5" />
-							<g id="logo-glint">
-								<ellipse cx="350" cy="270" rx="38" ry="11" transform="rotate(-48 350 270)" fill="#fff" opacity="0.45" filter="url(#logo-soft)" />
-							</g>
-						</g>
-						<!-- the globe: the classic "web" icon -->
+						<!-- the "web" globe; its meridians take turns squeezing so it looks like it's turning -->
 						<circle cx="445" cy="338" r="62" class="atmosphere" filter="url(#logo-soft)" />
 						<circle cx="445" cy="338" r="57" class="web-fill" />
 						<g class="globe web-icon">
 							<circle cx="445" cy="338" r="57" />
-							<!-- two meridians squeezed in turn so the globe looks like it's turning -->
 							<ellipse class="meridian" cx="445" cy="338" rx="26" ry="57" />
 							<ellipse class="meridian m2" cx="445" cy="338" rx="0.5" ry="57" />
 							<line x1="388" y1="338" x2="502" y2="338" />
 							<line x1="396" y1="309" x2="494" y2="309" />
 							<line x1="396" y1="367" x2="494" y2="367" />
 						</g>
-
-						<path class="sparkle" d="M484 242Q484 257 499 257Q484 257 484 272Q484 257 469 257Q484 257 484 242Z" /><circle class="sparkle s2" cx="506" cy="272" r="4" /><path class="sparkle s3" d="M420 497Q420 512 435 512Q420 512 420 527Q420 512 405 512Q420 512 420 497Z" />
 					</svg>
 
 					<h1 aria-label="Slow">
@@ -188,7 +130,9 @@
 				<section id="page-error" class="page-error hidden" role="alert" aria-labelledby="page-error-title">
 					<div class="page-error-card">
 						<svg class="page-error-art" viewBox="0 0 64 64" aria-hidden="true">
-							<path d="M41 10a22 22 0 1 0 13 39A18 18 0 0 1 41 10Z" />
+							<circle cx="32" cy="28" r="18" />
+							<ellipse cx="32" cy="28" rx="8" ry="18" />
+							<path d="M14 28h36" />
 							<path class="drift" d="M8 50h14M14 56h14" />
 						</svg>
 						<h2 id="page-error-title">Couldn't reach this site</h2>
