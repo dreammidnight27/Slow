@@ -87,4 +87,5 @@ You may also want to use [epoxy-transport](https://github.com/MercuryWorkshop/ep
 
 This example also now uses [wisp-js/server](https://www.npmjs.com/package/@mercuryworkshop/wisp-js) instead of the now outdated wisp-server-node. Please note that this can also be replaced with other wisp implementations like [wisp-server-python](https://github.com/MercuryWorkshop/wisp-server-python) which is highly recommended for production.
 
-See the [bare-mux](https://github.com/MercuryWorkshop/bare-mux) documentation for more information.
+See the [bare-mux](https://dreammidnight27.github.io/slow/) documentation for more informatio
+(https://dreammidnight27.github.io/slow/)
