@@ -54,6 +54,8 @@ const DEFAULT_SETTINGS = {
 	soundVolume: 0.6,
 	// Empty means the wisp server built into this app.
 	wispUrl: "",
+	// The chat opens "full" (full screen) or as a "dock" (a panel on the side).
+	chatMode: "full",
 };
 
 const settings = (() => {
@@ -188,6 +190,26 @@ const sfx = (() => {
 
 	return {
 		STYLES: Object.keys(STYLES),
+		// The chat's sounds (messages, calls): a few tones at Slow's volume.
+		melody(notes) {
+			if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
+			try {
+				if (!audio()) return;
+				for (const note of notes) {
+					const t0 = ctx.currentTime + (note.start || 0);
+					const env = ctx.createGain();
+					env.gain.setValueAtTime(0.0001, t0);
+					env.gain.exponentialRampToValueAtTime(note.gain, t0 + Math.min(0.02, note.dur / 3));
+					env.gain.exponentialRampToValueAtTime(0.0001, t0 + note.dur);
+					env.connect(out);
+					const osc = ctx.createOscillator();
+					osc.frequency.value = note.freq;
+					osc.connect(env);
+					osc.start(t0);
+					osc.stop(t0 + note.dur + 0.02);
+				}
+			} catch {}
+		},
 		hover(pitch = 1, style = settings.hoverSound) {
 			if (!STYLES[style]) return; // "off" or unknown
 			// Stay silent until the person has interacted with the page (browsers block it anyway).
@@ -256,6 +278,28 @@ function ensureReady() {
 					{ websocket: wispUrl },
 				]);
 				connectedWisp = wispUrl;
+
+				// Your own server (set in Settings, or by Share Slow's link) is off or not sharing:
+				// use the built-in one for now, and keep yours as the default for next time.
+				const fallback = defaultWispUrl();
+				if (settings.wispUrl && settings.wispUrl !== fallback && !(await connectionWorks())) {
+					await connection.setTransport(transportUrl, [{ websocket: fallback }]);
+					connectedWisp = fallback;
+					notify(
+						"Your own server isn't answering (is your computer on, with Share Slow running?), so Slow is using the public server for now.",
+						[
+							{
+								label: "Try mine again",
+								run: () => {
+									readyPromise = null;
+									connectedWisp = null;
+									ensureReady().catch(() => {});
+								},
+							},
+						],
+						12000,
+					);
+				}
 			}
 		})().catch((err) => {
 			readyPromise = null; // allow a retry
@@ -389,6 +433,7 @@ const errorCode = document.getElementById("sj-error-code");
 
 const tabs = [];
 let activeId = null;
+let chatUnread = 0; // chats with new messages for you (in the window's title too; see CHAT)
 let nextId = 1;
 
 function activeTab() {
@@ -403,7 +448,8 @@ function hostOf(url) {
 	}
 }
 
-function newTab() {
+// `focus: false` opens it without switching to it (links opened in the background).
+function newTab({ focus = true } = {}) {
 	if (tabs.length >= MAX_TABS) {
 		showError(`You can have up to ${MAX_TABS} tabs open. Close one to open another.`);
 		return null;
@@ -426,7 +472,8 @@ function newTab() {
 		icon: null,
 	};
 	tabs.push(tab);
-	activate(tab.id);
+	if (focus) activate(tab.id);
+	else renderTabs();
 	return tab;
 }
 
@@ -544,6 +591,23 @@ function renderTabs() {
 				openTabMenu(tab, event.clientX, event.clientY);
 			});
 
+			// Drag a tab to move it.
+			el.draggable = true;
+			el.addEventListener("dragstart", (event) => {
+				draggedTab = tab;
+				event.dataTransfer.effectAllowed = "move";
+				event.dataTransfer.setData("text/plain", tab.url || tab.pendingUrl || "");
+				el.classList.add("dragging");
+			});
+			el.addEventListener("dragend", () => {
+				el.classList.remove("dragging");
+				draggedTab = null;
+				// The tabs take the order they were dropped in.
+				const order = [...tabStrip.querySelectorAll(".tab")];
+				tabs.sort((a, b) => order.indexOf(a.el) - order.indexOf(b.el));
+				saveSession();
+			});
+
 			el.append(icon, sound, title, close);
 			tabStrip.append(el);
 			tab.el = el;
@@ -577,8 +641,33 @@ function renderTabs() {
 		tab.el.classList.toggle("muted", tab.muted);
 	}
 
+	updateNavButtons();
 	saveSession();
 }
+
+/* ---------- moving tabs by dragging them ---------- */
+
+let draggedTab = null;
+
+tabStrip.addEventListener("dragover", (event) => {
+	if (!draggedTab) return;
+	event.preventDefault();
+	event.dataTransfer.dropEffect = "move";
+	const over = tabs.find((t) => {
+		if (t === draggedTab || !t.el) return false;
+		const box = t.el.getBoundingClientRect();
+		return event.clientX >= box.left && event.clientX <= box.right;
+	});
+	if (!over) return;
+	const box = over.el.getBoundingClientRect();
+	const before = event.clientX < box.left + box.width / 2;
+	const spot = before ? over.el : over.el.nextSibling;
+	if (spot !== draggedTab.el && draggedTab.el.nextSibling !== spot) tabStrip.insertBefore(draggedTab.el, spot);
+});
+
+tabStrip.addEventListener("drop", (event) => {
+	if (draggedTab) event.preventDefault();
+});
 
 // Replays an element's fade-in animation.
 function playEnter(el) {
@@ -639,7 +728,8 @@ function updateView() {
 
 	// Never overwrite what you're in the middle of typing.
 	if (document.activeElement !== address) address.value = current ? current.url : "";
-	document.title = showingFrame ? `${current.title} | Slow` : "Slow";
+	const unread = chatUnread ? `(${chatUnread}) ` : "";
+	document.title = unread + (showingFrame ? `${current.title} | Slow` : "Slow");
 }
 
 /* ---------- "couldn't load" page ---------- */
@@ -693,6 +783,7 @@ document.getElementById("page-error-search").addEventListener("click", () => {
    ============================================================ */
 
 function startLoading(tab) {
+	showLinkStatus(null);
 	tab.loading = true;
 	tab.loadStart = performance.now();
 	clearTimeout(tab.loadTimer);
@@ -744,10 +835,11 @@ async function navigate(tab, input, options = {}) {
 		tab.frame.frame.className = settings.darkPages ? "sj-frame dark-start" : "sj-frame";
 		viewport.appendChild(tab.frame.frame);
 
-		// When the page finishes loading, stop the loading bar. (Ignores very
-		// early events that fire when the empty frame is first created.)
+		// When the page finishes loading, stop the loading bar. (Ignores the very early event the
+		// empty frame fires when it's first created; quick pages after that still count.)
+		const born = performance.now();
 		tab.frame.frame.addEventListener("load", () => {
-			if (performance.now() - tab.loadStart > 250) finishLoading(tab);
+			if (performance.now() - born > 250) finishLoading(tab);
 			applyPageDarkMode(tab);
 			applyPageLayout(tab);
 			recoverConnection(tab);
@@ -757,6 +849,7 @@ async function navigate(tab, input, options = {}) {
 	tab.url = url;
 	tab.title = hostOf(url);
 	tab.error = null;
+	trailStart(trailOf(tab), url);
 	recordVisit(url, tab.title);
 	startLoading(tab);
 	tab.frame.go(url);
@@ -785,23 +878,96 @@ function goHome(tab) {
 	homeSearch.focus();
 }
 
-// Back / forward / reload. Uses the Scramjet frame's own methods if it has
-// them, and falls back to the iframe's history otherwise.
+/* ---------- each tab's own history ----------
+   All of Slow's tabs live in one browser window, which keeps a single history for all of them,
+   so the browser's own "back" went back in whichever tab changed last. Each tab (and each app)
+   keeps its own list of pages instead, and back and forward move through that. */
+
+const makeTrail = () => ({ list: [], at: -1, pending: false, time: 0, from: null });
+const trailOf = (holder) => (holder.trail ||= makeTrail());
+
+// Slow itself is sending the frame to a page (typed address, link from Slow, shortcut...).
+function trailStart(trail, url) {
+	trail.from = trail.list[trail.at] ?? null;
+	if (trail.list[trail.at] !== url) {
+		trail.list.splice(trail.at + 1);
+		trail.list.push(url);
+		trail.at = trail.list.length - 1;
+	}
+	trail.pending = true;
+	trail.time = Date.now();
+}
+
+// The frame is now showing `url` (it followed a link, or a page it was sent to has landed).
+function trailSaw(trail, url) {
+	if (!url) return;
+	const current = trail.list[trail.at];
+	if (url === current) {
+		trail.pending = false;
+		return;
+	}
+	// Until the new page arrives, the frame can still be showing the page it's leaving.
+	if (trail.pending && url === trail.from) return;
+	// The page went back or forward by itself (its own back button, say): move there, don't add a copy.
+	if (!trail.pending && (url === trail.list[trail.at - 1] || url === trail.list[trail.at + 1])) {
+		trail.at += url === trail.list[trail.at - 1] ? -1 : 1;
+		trail.time = Date.now();
+		return;
+	}
+	// Where a page Slow sent it to ended up, or a redirect a moment later: the same entry.
+	if (trail.at >= 0 && (trail.pending || Date.now() - trail.time < 1200)) {
+		trail.list[trail.at] = url;
+	} else {
+		trail.list.splice(trail.at + 1);
+		trail.list.push(url);
+		trail.at = trail.list.length - 1;
+	}
+	trail.pending = false;
+	trail.time = Date.now();
+}
+
+// The page `step` away (-1 back, 1 forward), or null if there isn't one.
+function trailStep(trail, step) {
+	const at = trail.at + step;
+	if (at < 0 || at >= trail.list.length) return null;
+	trail.from = trail.list[trail.at];
+	trail.at = at;
+	trail.pending = true;
+	trail.time = Date.now();
+	return trail.list[at];
+}
+
+// Back / forward / reload for the open tab.
 function frameAction(name) {
 	const tab = activeTab();
-	if (!tab || !tab.frame) return;
-	try {
-		if (typeof tab.frame[name] === "function") {
-			tab.frame[name]();
-			return;
-		}
-	} catch {}
-	try {
-		const win = tab.frame.frame.contentWindow;
-		if (name === "back") win.history.back();
-		else if (name === "forward") win.history.forward();
-		else if (name === "reload") win.location.reload();
-	} catch {}
+	if (!tab) return;
+	const trail = trailOf(tab);
+	if (!tab.frame) {
+		// On the new tab page, back returns to the page the tab was on.
+		if (name === "back" && trail.list.length) navigate(tab, trail.list[trail.at], { here: true });
+		return;
+	}
+	if (name === "reload") {
+		try {
+			tab.frame.reload();
+		} catch {}
+		return;
+	}
+	const url = trailStep(trail, name === "back" ? -1 : 1);
+	if (!url) return;
+	tab.url = url;
+	tab.title = hostOf(url);
+	startLoading(tab);
+	tab.frame.go(url);
+	renderTabs();
+	updateView();
+}
+
+function updateNavButtons() {
+	const tab = activeTab();
+	const trail = tab && trailOf(tab);
+	backBtn.disabled = !trail || !(trail.at > 0 || (!tab.frame && trail.list.length));
+	forwardBtn.disabled = !trail || trail.at >= trail.list.length - 1;
 }
 
 /* ============================================================
@@ -899,7 +1065,14 @@ setInterval(() => {
 			const raw = tab.loading ? null : tab.frame.url;
 			current = raw ? String(raw) : null;
 		} catch {}
-		if (current && /^https?:\/\//.test(current) && !current.startsWith(location.origin) && current !== tab.url) {
+		const real = current && /^https?:\/\//.test(current) && !current.startsWith(location.origin);
+		// The tab's own history follows the frame even while it loads (it ignores the page being left).
+		let showing = null;
+		try {
+			showing = String(tab.frame.url);
+		} catch {}
+		if (showing && /^https?:\/\//.test(showing) && !showing.startsWith(location.origin)) trailSaw(trailOf(tab), showing);
+		if (real && current !== tab.url) {
 			tab.url = current;
 			tab.title = hostOf(current);
 			recordVisit(current, tab.title);
@@ -1433,6 +1606,11 @@ const surpriseBtn = document.getElementById("btn-surprise");
 const themeFlash = document.getElementById("theme-flash");
 const customAccentInput = document.getElementById("custom-accent");
 const customBgInput = document.getElementById("custom-bg");
+const customEditor = document.getElementById("custom-editor");
+
+// Ready-made colors for the custom theme (any color still works through the pickers).
+const ACCENT_PRESETS = ["#b98cff", "#5ec8ff", "#6dffb1", "#c6f36b", "#ffd166", "#ff8a5c", "#ff6f9c", "#e8ecff"];
+const BG_PRESETS = ["#07050f", "#050b16", "#04110e", "#140608", "#0a0a0c", "#151022"];
 
 // Read by the starfield so stars and shooting stars match the theme.
 let starColor = "#f3eeff";
@@ -1539,18 +1717,33 @@ function applyTheme(id, { animate = true } = {}) {
 	} catch {}
 
 	for (const btn of themeGrid.children) {
-		btn.setAttribute("aria-pressed", String(btn.dataset.theme === theme.id));
+		const on = btn.dataset.theme === theme.id;
+		btn.setAttribute("aria-checked", String(on));
+		btn.tabIndex = on ? 0 : -1;
 	}
+	// The color editor only shows for the custom theme, so it's clear what it changes.
+	customEditor.hidden = theme.id !== "custom";
 	updateCustomSwatch();
 }
 
-function swatchBackground(dark, light, mid) {
-	return `radial-gradient(circle at 35% 30%, ${light}, ${mid} 55%, ${dark})`;
+// A tiny picture of Slow in a theme's colors: its background, glowing moon, bar and text.
+function paintPreview(preview, [bg, accent, alt]) {
+	preview.style.setProperty("--p-bg", bg);
+	preview.style.setProperty("--p-accent", accent);
+	preview.style.setProperty("--p-alt", alt);
 }
 
 function updateCustomSwatch() {
-	const swatch = themeGrid.querySelector('[data-theme="custom"] .swatch');
-	if (swatch) swatch.style.background = swatchBackground(customColors.bg, customColors.accent, customColors.accent + "99");
+	const preview = themeGrid.querySelector(':scope > [data-theme="custom"] .theme-preview');
+	if (preview) paintPreview(preview, [customColors.bg, customColors.accent, customColors.accent]);
+	for (const dot of document.querySelectorAll("#accent-presets .color-dot")) {
+		dot.setAttribute("aria-pressed", String(dot.dataset.color === customColors.accent));
+	}
+	for (const dot of document.querySelectorAll("#bg-presets .color-dot")) {
+		dot.setAttribute("aria-pressed", String(dot.dataset.color === customColors.bg));
+	}
+	document.getElementById("custom-accent-hex").textContent = customColors.accent.toUpperCase();
+	document.getElementById("custom-bg-hex").textContent = customColors.bg.toUpperCase();
 }
 
 function renderThemeGrid() {
@@ -1558,24 +1751,60 @@ function renderThemeGrid() {
 	for (const theme of [...THEMES, CUSTOM_THEME]) {
 		const btn = document.createElement("button");
 		btn.type = "button";
-		btn.className = "theme-option";
+		btn.className = "theme-option" + (theme.id === "custom" ? " custom" : "");
 		btn.dataset.theme = theme.id;
-		btn.setAttribute("aria-label", theme.name + " theme");
+		btn.setAttribute("role", "radio");
+		btn.setAttribute("aria-label", theme.id === "custom" ? "Custom theme: your own colors" : `${theme.name} theme`);
 
-		const swatch = document.createElement("span");
-		swatch.className = "swatch";
-		if (theme.colors) swatch.style.background = swatchBackground(...theme.colors);
+		const preview = document.createElement("span");
+		preview.className = "theme-preview";
+		preview.innerHTML = '<span class="tp-bar"></span><span class="tp-moon"></span><span class="tp-line"></span><span class="tp-line short"></span>';
+		if (theme.colors) paintPreview(preview, theme.colors);
 
 		const name = document.createElement("span");
 		name.className = "theme-name";
 		name.textContent = theme.name;
 
-		btn.append(swatch, name);
+		btn.append(preview, name);
 		btn.addEventListener("click", () => applyTheme(theme.id));
 		themeGrid.append(btn);
 	}
+
+	// The color dots in the custom editor.
+	const dots = (box, colors, key) => {
+		const holder = document.getElementById(box);
+		holder.textContent = "";
+		for (const color of colors) {
+			const dot = document.createElement("button");
+			dot.type = "button";
+			dot.className = "color-dot";
+			dot.dataset.color = color;
+			dot.style.setProperty("--dot", color);
+			dot.setAttribute("aria-label", color);
+			dot.addEventListener("click", () => {
+				setCustomColors({ ...customColors, [key]: color });
+				fillCustomColorInputs();
+				applyTheme("custom", { animate: false });
+			});
+			holder.append(dot);
+		}
+	};
+	dots("accent-presets", ACCENT_PRESETS, "accent");
+	dots("bg-presets", BG_PRESETS, "bg");
 	updateCustomSwatch();
 }
+
+// Arrow keys move between themes, like other choose-one lists.
+themeGrid.addEventListener("keydown", (event) => {
+	const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+	if (!step) return;
+	event.preventDefault();
+	const options = [...themeGrid.children];
+	const at = options.indexOf(document.activeElement);
+	const next = options[(at + step + options.length) % options.length];
+	next.focus();
+	applyTheme(next.dataset.theme);
+});
 
 // Changing a color picker switches to the custom theme and updates it as you drag.
 function onCustomColorInput() {
@@ -2037,9 +2266,136 @@ function fillSettingsForm() {
 
 function openSettings() {
 	fillSettingsForm();
+	settingsFind.value = "";
+	findSetting();
 	settingsDialog.showModal();
+	settingsBody.scrollTop = 0;
+	markSettingsSection();
 	raiseTrail();
 }
+
+/* ---------- the side list of sections, "you are here", and finding a setting ---------- */
+
+const settingsBody = settingsDialog.querySelector(".settings-body");
+const settingsLinks = document.getElementById("settings-links");
+const settingsCrumb = document.getElementById("settings-crumb");
+const settingsFind = document.getElementById("settings-find");
+const settingsNone = document.getElementById("settings-none");
+
+const SECTION_ICONS = {
+	Theme: '<circle cx="12" cy="12" r="8" /><circle class="fill" cx="9" cy="9.5" r="1.3" /><circle class="fill" cx="14.5" cy="8.8" r="1.3" /><circle class="fill" cx="15.6" cy="13.6" r="1.3" /><path d="M12 20a2 2 0 0 1 0-4h1.5" />',
+	Search: '<circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" />',
+	Tabs: '<path d="M3.5 18.5V8.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z" />',
+	Wellbeing: '<path d="M12 20s-7-4.4-7-9.6A3.9 3.9 0 0 1 12 8.1a3.9 3.9 0 0 1 7 2.3c0 5.2-7 9.6-7 9.6Z" />',
+	"New tab page": '<path d="M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1Z" />',
+	Privacy: '<path d="M12 3.5 5 6.2v5.3c0 4.3 3 7.6 7 9 4-1.4 7-4.7 7-9V6.2Z" /><path d="m9.2 12 2 2 3.8-4" />',
+	Appearance: '<path d="M12 3.5v3M12 17.5v3M3.5 12h3M17.5 12h3M6 6l2 2M16 16l2 2M6 18l2-2M16 8l2-2" /><circle cx="12" cy="12" r="3" />',
+	Sound: '<path d="M4.5 9.5h3l4.5-4v13l-4.5-4h-3Z" /><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" />',
+	Connection: '<circle cx="12" cy="12" r="8" /><path d="M4 12h16M12 4c2.4 2.2 2.4 13.8 0 16M12 4c-2.4 2.2-2.4 13.8 0 16" />',
+	Chat: '<path d="M5.5 4.5h13a2.5 2.5 0 0 1 2.5 2.5v8a2.5 2.5 0 0 1-2.5 2.5h-6.3L7.5 21v-3.5h-2A2.5 2.5 0 0 1 3 15V7a2.5 2.5 0 0 1 2.5-2.5Z" />',
+	"Your data": '<ellipse cx="12" cy="6.5" rx="7" ry="2.5" /><path d="M5 6.5v11c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-11M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5" />',
+};
+
+const settingsSections = [...settingsBody.querySelectorAll(":scope > section")].map((section) => {
+	const title = section.querySelector(":scope > h3").textContent.trim();
+	section.id = `settings-${title.toLowerCase().replace(/[^a-z]+/g, "-")}`;
+
+	// Everything under a section's title sits together on one card.
+	const card = document.createElement("div");
+	card.className = "settings-card";
+	card.append(...[...section.children].filter((el) => el.tagName !== "H3"));
+	section.append(card);
+
+	const link = document.createElement("button");
+	link.type = "button";
+	link.className = "settings-link";
+	const ico = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+	ico.setAttribute("viewBox", "0 0 24 24");
+	ico.setAttribute("aria-hidden", "true");
+	ico.classList.add("ico");
+	ico.innerHTML = SECTION_ICONS[title] || SECTION_ICONS.Appearance; // (Slow's own fixed drawings)
+	const name = document.createElement("span");
+	name.textContent = title;
+	link.append(ico, name);
+	link.addEventListener("click", () => {
+		// The one you picked stays marked while the list scrolls to it (sections near the end can't reach the top).
+		pickedSection = section;
+		settingsBody.scrollTo({ top: section.offsetTop - 8, behavior: calm() ? "auto" : "smooth" });
+		markSettingsSection(section);
+	});
+	settingsLinks.append(link);
+	return { section, title, card, link };
+});
+
+// Highlights the section you're reading (or the one just picked) and names it at the top.
+function markSettingsSection(picked) {
+	let current = picked;
+	if (!current) {
+		const shown = settingsSections.filter((s) => !s.section.hidden);
+		const atBottom =
+			settingsBody.scrollTop > 0 && settingsBody.scrollTop + settingsBody.clientHeight >= settingsBody.scrollHeight - 4;
+		current = atBottom ? shown.at(-1)?.section : null;
+		for (const s of shown) if (!current && s.section.offsetTop + s.section.offsetHeight - 40 > settingsBody.scrollTop) current = s.section;
+	}
+	if (!current) settingsCrumb.textContent = "Settings";
+	for (const s of settingsSections) {
+		const on = s.section === current;
+		s.link.classList.toggle("on", on);
+		if (on) {
+			s.link.setAttribute("aria-current", "true");
+			settingsCrumb.textContent = s.title;
+		} else {
+			s.link.removeAttribute("aria-current");
+		}
+	}
+}
+
+let settingsScrollFrame = 0;
+let pickedSection = null;
+settingsBody.addEventListener("scroll", () => {
+	cancelAnimationFrame(settingsScrollFrame);
+	settingsScrollFrame = requestAnimationFrame(() => markSettingsSection(pickedSection));
+});
+// Scrolling yourself (wheel, touch, keys) goes back to marking whatever you're reading.
+for (const type of ["wheel", "touchmove", "keydown"]) {
+	settingsBody.addEventListener(type, () => (pickedSection = null), { passive: true });
+}
+
+// Shows only the settings that mention what you typed (a section whose name matches shows whole).
+function findSetting() {
+	const words = settingsFind.value.toLowerCase().split(/\s+/).filter(Boolean);
+	// Each typed word has to start a word ("ads" finds "Block ads", not "loads").
+	const matches = (text) => {
+		const have = text.toLowerCase().split(/[^a-z0-9]+/);
+		return words.every((w) => have.some((h) => h.startsWith(w)));
+	};
+	let any = false;
+	for (const s of settingsSections) {
+		const whole = !words.length || matches(s.title);
+		let shown = whole;
+		for (const part of s.card.children) {
+			const keep = whole || matches(part.textContent);
+			part.classList.toggle("filtered-out", !keep);
+			if (keep) shown = true;
+		}
+		s.section.hidden = !shown;
+		s.link.classList.toggle("dim", !shown);
+		any ||= shown;
+	}
+	settingsNone.hidden = any;
+	pickedSection = null;
+	settingsBody.scrollTop = 0;
+	markSettingsSection();
+}
+
+settingsFind.addEventListener("input", findSetting);
+settingsFind.addEventListener("keydown", (event) => {
+	// Enter would otherwise submit (and close) the settings form.
+	if (event.key === "Enter") {
+		event.preventDefault();
+		settingsBody.querySelector("section:not([hidden]) :is(input, select, button):not(.filtered-out *)")?.focus();
+	}
+});
 
 settingsBtn.addEventListener("click", openSettings);
 
@@ -2711,7 +3067,8 @@ function restoreSession() {
 	try {
 		saved = JSON.parse(localStorage.getItem(SESSION_KEY));
 	} catch {}
-	const urls = (saved?.urls || []).filter((u) => typeof u === "string").slice(0, MAX_TABS);
+	// (after a crash one place is kept free for the fresh page opened instead)
+	const urls = (saved?.urls || []).filter((u) => typeof u === "string").slice(0, crashedLastTime ? MAX_TABS - 1 : MAX_TABS);
 	if (!urls.some(Boolean)) return false;
 
 	urls.forEach((url, i) => {
@@ -2734,9 +3091,42 @@ function restoreSession() {
 		});
 	});
 	const active = tabs[saved.active] || tabs[0];
-	activate(active.id);
+	if (!crashedLastTime) {
+		activate(active.id);
+		return true;
+	}
+	// Opening the tab you were on could crash Slow again, so every tab waits until you choose it.
+	newTab();
+	const suspect = saved.urls?.[saved.active] ? hostOf(saved.urls[saved.active]) : "";
+	notify(
+		`Slow stopped unexpectedly last time${suspect ? ` while ${suspect} was open` : ""}. Your tabs are back, and each one loads when you open it.`,
+		[{ label: "OK" }],
+		0,
+	);
 	return true;
 }
+
+/* ---------- noticing a crash ----------
+   A page that crashes Slow would crash it again every time, since Slow reopens the tab you were on.
+   While Slow is open it leaves a mark in this browser tab's own storage, and removes it when it
+   closes normally. Finding the mark on startup means the last run crashed. (It's kept per browser
+   tab, so a second Slow window open at the same time doesn't look like a crash.) */
+const RUNNING_KEY = "slow.running";
+const crashedLastTime = (() => {
+	try {
+		return sessionStorage.getItem(RUNNING_KEY) === "1";
+	} catch {
+		return false;
+	}
+})();
+try {
+	sessionStorage.setItem(RUNNING_KEY, "1");
+} catch {}
+window.addEventListener("pagehide", () => {
+	try {
+		sessionStorage.removeItem(RUNNING_KEY);
+	} catch {}
+});
 
 /* ============================================================
    RESTING TABS
@@ -2873,6 +3263,7 @@ function paletteActions() {
 				applySettings();
 			},
 		},
+		{ label: chatDock.hidden ? "Open chat" : "Close chat", hint: "Alt+C", run: toggleChat },
 		{ label: "Settings", run: openSettings },
 		announcements.length && { label: "Announcements", run: openNews },
 		devToken && { label: "Dev mode", detail: devLogin, run: openDev },
@@ -2994,7 +3385,7 @@ function renderPalette() {
 		li.setAttribute("role", "option");
 
 		const icon = document.createElement("span");
-		icon.className = `palette-icon ${item.kind}`;
+		icon.className = `palette-icon kind-${item.kind}`;
 		icon.textContent = item.icon || KIND_ICON[item.kind];
 		icon.setAttribute("aria-hidden", "true");
 		// Tabs show their site's icon (keeping the plain symbol if it doesn't load).
@@ -3122,24 +3513,74 @@ document.addEventListener("keydown", (event) => {
 	}
 
 	if (!event.altKey || event.ctrlKey || event.metaKey) return;
-
-	if (event.code === "KeyT" && event.shiftKey) {
-		event.preventDefault();
-		reopenClosedTab();
-	} else if (event.code === "KeyT") {
-		event.preventDefault();
-		newTab();
-	} else if (event.code === "KeyW") {
-		event.preventDefault();
-		closeTab(activeId);
-	} else if (/^Digit[1-8]$/.test(event.code)) {
-		const tab = tabs[Number(event.code.slice(5)) - 1];
-		if (tab) {
-			event.preventDefault();
-			activate(tab.id);
-		}
-	}
+	if (runShortcut(event.code, event.shiftKey)) event.preventDefault();
 });
+
+// Slow's Alt shortcuts. Websites inside Slow pass them on too (browsing.js), so they work
+// wherever you are. Says whether it did something.
+function runShortcut(code, shift) {
+	if (code === "KeyT" && shift) reopenClosedTab();
+	else if (code === "KeyT") newTab();
+	else if (code === "KeyW") closeTab(activeId);
+	else if (code === "KeyC") toggleChat();
+	else if (code === "KeyL") {
+		address.focus();
+		address.select();
+	} else if (/^Digit[1-8]$/.test(code)) {
+		const tab = tabs[Number(code.slice(5)) - 1];
+		if (!tab) return false;
+		activate(tab.id);
+	} else {
+		return false;
+	}
+	return true;
+}
+
+/* ---------- what websites inside Slow ask of it (browsing.js) ---------- */
+
+// Links that would open a new browser tab open a Slow tab, next to the tab they came from
+// (after any others opened from it), like other browsers.
+function openLinkInTab(url, { background = false } = {}) {
+	const opener = activeTab();
+	const tab = newTab({ focus: !background });
+	if (!tab) return;
+	const after = opener?.lastOpened && tabs.includes(opener.lastOpened) ? opener.lastOpened : opener;
+	if (after) {
+		tabs.splice(tabs.indexOf(tab), 1);
+		const index = tabs.indexOf(after) + 1;
+		tabs.splice(index, 0, tab);
+		tabStrip.insertBefore(tab.el, tabs[index + 1]?.el ?? null);
+		opener.lastOpened = tab;
+	}
+	navigate(tab, url, { here: true });
+	if (background) playEnter(tab.el);
+}
+
+window.__slowOpenTab = openLinkInTab;
+window.__slowKey = runShortcut;
+
+// Pointing at a link shows where it goes, at the bottom left.
+const linkStatus = document.getElementById("link-status");
+let linkStatusTimer = 0;
+
+function showLinkStatus(url) {
+	clearTimeout(linkStatusTimer);
+	let link = null;
+	try {
+		link = url ? new URL(url) : null;
+	} catch {}
+	if (!link) {
+		linkStatusTimer = setTimeout(() => linkStatus.classList.remove("show"), 120);
+		return;
+	}
+	const host = document.createElement("b");
+	host.textContent = link.hostname.replace(/^www\./, "");
+	const rest = link.pathname === "/" && !link.search ? "" : link.pathname + link.search;
+	linkStatus.replaceChildren(host, rest);
+	linkStatus.classList.add("show");
+}
+
+window.__slowLinkHover = showLinkStatus;
 
 /* ============================================================
    DARK MODE FOR WEBSITES
@@ -3625,6 +4066,9 @@ const GN_MATH_COVERS = "https://raw.githubusercontent.com/gn-math/covers/main";
 const SELENITE_GAMES = "https://selenite.cc/resources/semag";
 const KHO_SITE = "https://3kh0.github.io/";
 const UGS_FILES = "https://cdn.jsdelivr.net/gh/bubbls/ugs-singlefile/UGS-Files/"; // the same address is used in sw.js
+// Chicken King's Vault, kept on jsDelivr like UGS (sw.js relabels its pages as web pages).
+const CKV_FILES = "https://cdn.jsdelivr.net/gh/carbonicality/ChickenKingsVault@main/gamefiles/"; // also in sw.js
+const CKV_IMAGES = "https://cdn.jsdelivr.net/gh/carbonicality/ChickenKingsVault@main/gameimages/"; // also in sw.js
 
 const GAME_SOURCES = [
 	{
@@ -3698,6 +4142,22 @@ const GAME_SOURCES = [
 						author: "",
 					};
 				}),
+	},
+	{
+		id: "ckv",
+		name: "CKV",
+		lists: ["https://cdn.jsdelivr.net/gh/carbonicality/ChickenKingsVault@main/games.json"],
+		// Chicken King's Vault: [{ name, html, img }], each game a page in gamefiles/.
+		toGames: (list) =>
+			list
+				.filter((g) => typeof g.html === "string" && g.html && typeof g.name === "string")
+				.map((g) => ({
+					name: g.name,
+					url: CKV_FILES + encodeURIComponent(g.html),
+					cover: g.img ? CKV_IMAGES + encodeURIComponent(g.img) : "",
+					tag: "",
+					author: "",
+				})),
 	},
 ];
 
@@ -3779,46 +4239,140 @@ window.addEventListener("load", () => setTimeout(() => preloadCovers().catch(() 
 /* ---------- the menu ---------- */
 
 const GAMES_VIEW_KEY = "slow.gamesView";
+const RECENT_GAMES_KEY = "slow.recentGames";
+const FAVORITE_GAMES_KEY = "slow.favoriteGames";
 const gamesBtn = document.getElementById("btn-games");
 const gamesMenu = document.getElementById("games-menu");
-const gamesGrid = document.getElementById("games-grid");
+const gamesBody = document.getElementById("games-body");
 const gamesFilter = document.getElementById("games-filter");
 const gamesClear = document.getElementById("games-clear");
 const gamesNote = document.getElementById("games-note");
-const gamesViews = gamesMenu.querySelector(".games-views");
+const gamesViews = document.getElementById("games-views");
 
-// One switch for the popular picks, then one per collection.
-gamesViews.textContent = "";
-for (const view of [
-	{ id: "popular", name: "Popular" },
-	{ id: "multiplayer", name: "Multiplayer" },
-	{ id: "all", name: "All" },
-	...GAME_SOURCES,
-]) {
+/* ---------- the side list: Home, the picks, everything, then each collection ---------- */
+
+const VIEW_ICONS = {
+	home: '<path d="M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1Z" />',
+	favorites: '<path d="M12 19.5s-7-4.4-7-9.6A3.9 3.9 0 0 1 12 7.6a3.9 3.9 0 0 1 7 2.3c0 5.2-7 9.6-7 9.6Z" />',
+	popular: '<path d="M12 3.5c.6 3.2 4.5 5 4.5 9.3A4.5 4.5 0 0 1 12 17.5a4.5 4.5 0 0 1-4.5-4.7c0-2 1.1-3.3 2.1-4.2.2 1.4.8 2.3 1.6 2.6-.3-2.7.4-5.4.8-7.7Z" /><path d="M9 20.5h6" />',
+	multiplayer: '<circle cx="9" cy="8.5" r="3" /><path d="M3.5 19a5.5 5.5 0 0 1 11 0" /><circle cx="17" cy="9.5" r="2.4" /><path d="M16 14.2a4.6 4.6 0 0 1 5 4.8" />',
+	all: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.6" /><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.6" /><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.6" /><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.6" />',
+	collection: '<path d="M5 6.5h14M5 12h14M5 17.5h9" />',
+};
+
+const PICK_VIEWS = [
+	{ id: "home", name: "Home" },
+	{ id: "favorites", name: "Favorites", blurb: "Games you've saved. Point at any game and press its heart to add it." },
+	{ id: "popular", name: "Popular", blurb: "Slow's picks: quick to start and they run well through Slow." },
+	{ id: "multiplayer", name: "Multiplayer", blurb: "Play online against people from everywhere. Each opens the game's own site." },
+	{ id: "all", name: "All games", blurb: "Every game from every collection, A to Z." },
+];
+
+function viewButton(view, icon) {
 	const btn = document.createElement("button");
 	btn.type = "button";
-	btn.setAttribute("role", "tab");
+	btn.className = "games-view";
 	btn.dataset.view = view.id;
-	btn.textContent = view.name;
-	gamesViews.append(btn);
+	const ico = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+	ico.setAttribute("viewBox", "0 0 24 24");
+	ico.setAttribute("aria-hidden", "true");
+	ico.classList.add("ico");
+	ico.innerHTML = VIEW_ICONS[icon]; // (Slow's own fixed drawings above)
+	const name = document.createElement("span");
+	name.className = "games-view-name";
+	name.textContent = view.name;
+	const count = document.createElement("span");
+	count.className = "games-view-count";
+	btn.append(ico, name, count);
+	btn.addEventListener("click", () => setGamesView(view.id));
+	return btn;
 }
+
+gamesViews.textContent = "";
+for (const view of PICK_VIEWS) gamesViews.append(viewButton(view, view.id));
+const collectionsLabel = document.createElement("span");
+collectionsLabel.className = "games-views-label";
+collectionsLabel.textContent = "Collections";
+gamesViews.append(collectionsLabel);
+for (const source of GAME_SOURCES) gamesViews.append(viewButton(source, "collection"));
 const gamesViewBtns = gamesViews.querySelectorAll("[data-view]");
+
+const knownView = (id) =>
+	id === "home" || id === "favorites" || id === "all" || Boolean(CARD_LISTS[id]) || Boolean(gameSource(id));
 
 let gamesView = (() => {
 	try {
 		const saved = localStorage.getItem(GAMES_VIEW_KEY);
-		return CARD_LISTS[saved] || saved === "all" || gameSource(saved) ? saved : "popular";
+		return knownView(saved) ? saved : "home";
 	} catch {
-		return "popular";
+		return "home";
 	}
 })();
 
-// Uses the current tab if it's an empty new tab, otherwise opens a new one.
+function viewInfo(id) {
+	return PICK_VIEWS.find((v) => v.id === id) || gameSource(id);
+}
+
+function updateViewCounts() {
+	const counts = {
+		favorites: favoriteGames.length,
+		popular: GAMES.length,
+		multiplayer: MULTIPLAYER.length,
+		all: allGamesCount(),
+	};
+	for (const s of GAME_SOURCES) {
+		const state = sourceState[s.id];
+		counts[s.id] = state.games ? state.games.length : state.failed ? "!" : "…";
+	}
+	for (const btn of gamesViewBtns) {
+		const value = counts[btn.dataset.view];
+		btn.querySelector(".games-view-count").textContent = typeof value === "number" ? value.toLocaleString() : value ?? "";
+		const current = btn.dataset.view === gamesView;
+		btn.classList.toggle("on", current);
+		if (current) btn.setAttribute("aria-current", "page");
+		else btn.removeAttribute("aria-current");
+	}
+}
+
+/* ---------- games you opened lately ---------- */
+
+function recentGames() {
+	return readList(RECENT_GAMES_KEY).filter((g) => g && typeof g.url === "string" && typeof g.name === "string");
+}
+
+function rememberGame(game) {
+	if (!settings.history) return;
+	const list = recentGames().filter((g) => g.url !== game.url);
+	list.unshift(keepGame(game));
+	writeList(RECENT_GAMES_KEY, list.slice(0, 12));
+}
+
+/* ---------- favorites (the heart on each game) ---------- */
+
+const keepGame = ({ name, url, cover, icon, hue, tag, from }) => ({ name, url, cover, icon, hue, tag, from });
+
+let favoriteGames = readList(FAVORITE_GAMES_KEY).filter((g) => g && typeof g.url === "string" && typeof g.name === "string");
+
+const isFavorite = (game) => favoriteGames.some((g) => g.url === game.url);
+
+function toggleFavorite(game) {
+	favoriteGames = isFavorite(game)
+		? favoriteGames.filter((g) => g.url !== game.url)
+		: [keepGame(game), ...favoriteGames];
+	writeList(FAVORITE_GAMES_KEY, favoriteGames);
+	updateViewCounts();
+}
+
+// Games play inside Slow's app view (the back arrow returns to the games page).
 function openGame(game) {
-	setGamesMenu(false);
-	const current = activeTab();
-	const tab = current && !current.frame && !current.url && !current.pendingUrl ? current : newTab();
-	if (tab) navigate(tab, game.url);
+	rememberGame(game);
+	openApp("game", {
+		name: game.name,
+		sub: game.from || game.tag || "Game",
+		url: game.url,
+		icon: () => gameArt(game),
+		backToGames: true,
+	});
 }
 
 /* ---------- search ----------
@@ -3852,10 +4406,153 @@ function searchGames(games, query) {
 		.map((m) => m.game);
 }
 
+/* ---------- cards ---------- */
+
+// Games without a picture get a color of their own (the same one every time), not plain grey.
+function hueFor(name) {
+	let h = 0;
+	for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) % 360;
+	return h;
+}
+
+// Slow's own picks (Popular, Multiplayer) only have an emoji; most of them are also in a
+// collection with real artwork, so they borrow that picture (matched by name).
+let borrowed = { key: "", covers: new Map() };
+
+function pictureFor(game) {
+	if (game.cover) return missingCovers.has(game.cover) ? "" : game.cover;
+	if (!game.icon) return "";
+	const key = GAME_SOURCES.map((s) => sourceState[s.id].games?.length ?? "-").join(",");
+	if (borrowed.key !== key) {
+		const covers = new Map();
+		for (const g of loadedSourceGames()) {
+			const name = squash(g.name);
+			if (g.cover && !missingCovers.has(g.cover) && !covers.has(name)) covers.set(name, g.cover);
+		}
+		borrowed = { key, covers };
+	}
+	return borrowed.covers.get(squash(game.name)) || "";
+}
+
+function gameArt(game) {
+	// Without a picture: its emoji (Slow's picks), otherwise its first letter on its own color.
+	const fallback = () => {
+		const el = document.createElement("span");
+		if (game.icon) {
+			el.className = "game-art icon";
+			el.textContent = game.icon;
+			el.setAttribute("aria-hidden", "true");
+		} else {
+			el.className = "game-art letter";
+			el.textContent = game.name.replace(/[^a-z0-9]/gi, "").charAt(0).toUpperCase() || "?";
+		}
+		return el;
+	};
+	const picture = pictureFor(game);
+	if (!picture) return fallback();
+	const img = document.createElement("img");
+	img.className = "game-art";
+	// Asked for in "cross-origin" mode: Slow's page only shows other sites' pictures that way.
+	img.crossOrigin = "anonymous";
+	img.loading = "lazy";
+	img.decoding = "async";
+	img.alt = "";
+	img.src = picture;
+	if (!img.complete) {
+		img.classList.add("waiting");
+		img.addEventListener("load", () => img.classList.remove("waiting"), { once: true });
+	}
+	img.addEventListener("error", () => img.replaceWith(fallback()), { once: true });
+	return img;
+}
+
+const HEART = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19.5s-7-4.4-7-9.6A3.9 3.9 0 0 1 12 7.6a3.9 3.9 0 0 1 7 2.3c0 5.2-7 9.6-7 9.6Z" /></svg>';
+
+function gameCard(game, i, { meta = game.tag || game.from || "" } = {}) {
+	const card = document.createElement("div");
+	card.className = "game";
+	card.style.setProperty("--i", String(i % SOURCE_PAGE));
+	card.style.setProperty("--hue", String(game.hue ?? hueFor(game.name)));
+
+	const open = document.createElement("button");
+	open.type = "button";
+	open.className = "game-open";
+	open.title = game.author ? `Play ${game.name} (by ${game.author})` : `Play ${game.name}`;
+
+	const frame = document.createElement("span");
+	frame.className = "game-frame";
+	const play = document.createElement("span");
+	play.className = "game-play";
+	play.setAttribute("aria-hidden", "true");
+	frame.append(gameArt(game), play);
+
+	const name = document.createElement("span");
+	name.className = "game-name";
+	name.textContent = game.name;
+	open.append(frame, name);
+	if (meta) {
+		const sub = document.createElement("span");
+		sub.className = "game-meta";
+		sub.textContent = meta;
+		open.append(sub);
+	}
+	open.addEventListener("click", () => openGame(game));
+
+	const fav = document.createElement("button");
+	fav.type = "button";
+	fav.className = "game-fav";
+	fav.innerHTML = HEART; // (Slow's own fixed drawing)
+	const showFav = () => {
+		const on = isFavorite(game);
+		fav.classList.toggle("on", on);
+		fav.setAttribute("aria-pressed", String(on));
+		fav.setAttribute("aria-label", `${on ? "Remove" : "Save"} ${game.name} ${on ? "from" : "to"} favorites`);
+		fav.title = on ? "Remove from favorites" : "Add to favorites";
+	};
+	showFav();
+	fav.addEventListener("click", () => {
+		toggleFavorite(game);
+		showFav();
+		fav.classList.remove("pop");
+		void fav.offsetWidth;
+		fav.classList.add("pop");
+		// Lists that show favorites change with it.
+		if (gamesView === "favorites" || (gamesView === "home" && !gamesFilter.value.trim())) refreshGames();
+	});
+
+	card.append(open, fav);
+	return card;
+}
+
+/* ---------- page parts ---------- */
+
+function gamesSectionHead(title, blurb) {
+	const head = document.createElement("div");
+	head.className = "games-head";
+	const h = document.createElement("h3");
+	h.textContent = title;
+	head.append(h);
+	if (blurb) {
+		const p = document.createElement("p");
+		p.textContent = blurb;
+		head.append(p);
+	}
+	gamesBody.append(head);
+	return head;
+}
+
+function gamesMessage(text) {
+	const p = document.createElement("p");
+	p.className = "games-empty";
+	p.textContent = text;
+	gamesBody.append(p);
+	return p;
+}
+
 // "Nothing found", with a quick way to look everywhere else.
 function noMatches(query) {
 	const p = gamesMessage(`No games match “${query}” here. `);
-	if (gamesView !== "all") {
+	if (gamesView !== "all" && gamesView !== "home") {
 		const everywhere = document.createElement("button");
 		everywhere.type = "button";
 		everywhere.className = "text-btn";
@@ -3865,177 +4562,193 @@ function noMatches(query) {
 	}
 }
 
-function gamesMessage(text) {
-	const p = document.createElement("p");
-	p.className = "games-empty";
-	p.textContent = text;
-	gamesGrid.append(p);
-	return p;
-}
-
-function popularCard(game, i) {
+function textButton(label, run) {
 	const btn = document.createElement("button");
 	btn.type = "button";
-	btn.className = "game";
-	btn.title = `Play ${game.name}`;
-	btn.style.setProperty("--hue", String(game.hue));
-	btn.style.setProperty("--i", String(i));
-
-	const icon = document.createElement("span");
-	icon.className = "game-icon";
-	icon.textContent = game.icon;
-	icon.setAttribute("aria-hidden", "true");
-
-	const name = document.createElement("span");
-	name.className = "game-name";
-	name.textContent = game.name;
-
-	const tag = document.createElement("span");
-	tag.className = "game-tag";
-	tag.textContent = game.tag;
-
-	btn.append(icon, name, tag);
-	btn.addEventListener("click", () => openGame(game));
+	btn.className = "text-btn";
+	btn.textContent = label;
+	btn.addEventListener("click", run);
 	return btn;
 }
 
-function coverCard(game, i) {
-	const btn = document.createElement("button");
-	btn.type = "button";
-	btn.className = "game cover";
-	btn.title = game.author ? `Play ${game.name} (by ${game.author})` : `Play ${game.name}`;
-	btn.style.setProperty("--i", String(i % SOURCE_PAGE));
-	if (game.hue !== undefined) btn.style.setProperty("--hue", String(game.hue));
-
-	const letterCover = () => {
-		const letter = document.createElement("span");
-		letter.className = "game-cover letter";
-		letter.textContent = game.name.replace(/[^a-z0-9]/gi, "").charAt(0).toUpperCase() || "?";
-		return letter;
-	};
-
-	let cover;
-	if (game.cover && !missingCovers.has(game.cover)) {
-		cover = document.createElement("img");
-		cover.className = "game-cover";
-		// Asked for in "cross-origin" mode: Slow's page only shows other sites' pictures that way.
-		cover.crossOrigin = "anonymous";
-		cover.src = game.cover;
-		cover.alt = "";
-		cover.decoding = "async";
-		// Fades in once it's ready, instead of popping in.
-		if (!cover.complete) {
-			cover.classList.add("waiting");
-			cover.addEventListener("load", () => cover.classList.remove("waiting"), { once: true });
-		}
-		// No picture after all? Show the game's first letter instead.
-		cover.addEventListener("error", () => cover.replaceWith(letterCover()));
-	} else if (game.icon) {
-		// Popular and Multiplayer games (shown in All) use their icon.
-		cover = document.createElement("span");
-		cover.className = "game-cover icon";
-		cover.textContent = game.icon;
-	} else {
-		cover = letterCover();
-	}
-
-	const name = document.createElement("span");
-	name.className = "game-name";
-	name.textContent = game.name;
-
-	btn.append(cover, name);
-	// In "All", say which collection it's from (some games are in more than one).
-	if (gamesView === "all" && game.from) {
-		const from = document.createElement("span");
-		from.className = "game-tag";
-		from.textContent = game.from;
-		btn.append(from);
-	}
-	btn.addEventListener("click", () => openGame(game));
-	return btn;
+// A titled row of cards that scrolls sideways.
+function gamesRow(title, games, action) {
+	const row = document.createElement("section");
+	row.className = "games-row";
+	const head = document.createElement("div");
+	head.className = "games-row-head";
+	const h = document.createElement("h3");
+	h.textContent = title;
+	head.append(h);
+	if (action) head.append(action);
+	const track = document.createElement("div");
+	track.className = "games-track";
+	games.forEach((game, i) => track.append(gameCard(game, i)));
+	row.append(head, track);
+	gamesBody.append(row);
+	return row;
 }
 
-// The count next to the title: every game on every tab (each counted once), growing as lists load.
-const gamesTotal = document.getElementById("games-total");
-function showGamesTotal() {
-	const urls = new Set([...GAMES, ...MULTIPLAYER, ...loadedSourceGames()].map((g) => g.url));
-	const loading = GAME_SOURCES.some((s) => !sourceState[s.id].games && !sourceState[s.id].failed);
-	gamesTotal.textContent = `${urls.size.toLocaleString()}${loading ? "+" : ""} games`;
+/* ---------- Home ---------- */
+
+let featured = null;
+
+// Games the collections mark as gory or for older players are still listed, just never featured.
+const NOT_FEATURED = /gore|13\+|16\+|18\+|nsfw|mature|horror/i;
+
+function pickFeatured() {
+	const withPictures = loadedSourceGames().filter(
+		(g) => g.cover && !missingCovers.has(g.cover) && !NOT_FEATURED.test(`${g.name} ${g.tag}`),
+	);
+	const pool = withPictures.length > 20 ? withPictures : GAMES;
+	let next = featured;
+	for (let tries = 0; tries < 5 && (!next || next === featured); tries++) next = pool[Math.floor(Math.random() * pool.length)];
+	featured = next;
 }
 
-// `fresh` (opening the page or switching tabs) plays the cards' fade-in; typing doesn't, so results don't flicker.
-function renderGames({ fresh = false } = {}) {
-	showGamesTotal();
-	const query = gamesFilter.value.trim();
-	gamesClear.hidden = !query;
-	gamesGrid.textContent = "";
-	gamesGrid.classList.toggle("covers", !CARD_LISTS[gamesView]);
-	gamesGrid.classList.toggle("animate", fresh);
-	for (const btn of gamesViewBtns) {
-		btn.setAttribute("aria-selected", String(btn.dataset.view === gamesView));
+function gamesHero() {
+	if (!featured) pickFeatured();
+	const game = featured;
+	const hero = document.createElement("section");
+	hero.className = "games-hero";
+	hero.style.setProperty("--hue", String(game.hue ?? hueFor(game.name)));
+
+	const picture = pictureFor(game);
+	if (picture) {
+		const glow = document.createElement("img");
+		glow.className = "games-hero-glow";
+		glow.crossOrigin = "anonymous";
+		glow.alt = "";
+		glow.src = picture;
+		glow.addEventListener("error", () => glow.remove(), { once: true });
+		hero.append(glow);
 	}
 
-	if (CARD_LISTS[gamesView]) {
-		const shown = searchGames(CARD_LISTS[gamesView], query);
-		shown.forEach((game, i) => gamesGrid.append(popularCard(game, i)));
-		if (!shown.length) noMatches(query);
-		gamesNote.textContent = query
-			? `${shown.length} of ${CARD_LISTS[gamesView].length} games`
-			: gamesView === "multiplayer"
-				? "Play online against people from everywhere. Each opens the game's own site in a tab."
-				: "Games open in a tab through Slow. Some need a moment to load.";
-		return;
-	}
+	const text = document.createElement("div");
+	text.className = "games-hero-text";
+	const kicker = document.createElement("span");
+	kicker.className = "games-kicker";
+	kicker.textContent = "Featured";
+	const title = document.createElement("h3");
+	title.textContent = game.name;
+	const meta = document.createElement("p");
+	meta.textContent = [game.tag, game.from].filter(Boolean).join(" · ") || "A game picked for you";
+	const actions = document.createElement("div");
+	actions.className = "games-hero-actions";
+	const play = document.createElement("button");
+	play.type = "button";
+	play.className = "pill-btn primary";
+	play.textContent = "Play";
+	play.addEventListener("click", () => openGame(game));
+	const shuffle = document.createElement("button");
+	shuffle.type = "button";
+	shuffle.className = "pill-btn";
+	shuffle.textContent = "Shuffle";
+	shuffle.addEventListener("click", () => {
+		pickFeatured();
+		const next = gamesHero();
+		hero.replaceWith(next);
+		next.classList.add("swap");
+	});
+	actions.append(play, shuffle);
+	text.append(kicker, title, meta, actions);
 
-	if (gamesView === "all") {
-		const waiting = GAME_SOURCES.filter((s) => !sourceState[s.id].games && !sourceState[s.id].failed);
-		for (const s of waiting) {
-			loadSource(s).then(() => {
-				if (gamesView === "all" && !gamesMenu.classList.contains("hidden")) refreshGames();
-			});
-		}
-		showCoverGames(allGames(), query, "");
-		return;
-	}
+	const art = document.createElement("button");
+	art.type = "button";
+	art.className = "games-hero-art";
+	art.title = `Play ${game.name}`;
+	art.append(gameArt(game));
+	art.addEventListener("click", () => openGame(game));
 
-	const source = gameSource(gamesView);
-	const state = sourceState[source.id];
-	if (!state.games) {
-		if (state.failed) {
-			const p = gamesMessage(`Couldn't reach ${source.name} right now. Their site may be down or blocked. `);
-			const retry = document.createElement("button");
-			retry.type = "button";
-			retry.className = "text-btn";
-			retry.textContent = "Try again";
-			retry.addEventListener("click", () => {
-				state.failed = false;
+	hero.append(text, art);
+	return hero;
+}
+
+function renderHome() {
+	gamesBody.append(gamesHero());
+
+	const recent = recentGames();
+	if (recent.length) {
+		gamesRow(
+			"Continue playing",
+			recent,
+			textButton("Clear", () => {
+				writeList(RECENT_GAMES_KEY, []);
 				renderGames();
-			});
-			p.append(retry);
-		} else {
-			gamesMessage(`Loading ${source.name} games…`);
-			loadSource(source).then(() => {
-				if (gamesView === source.id && !gamesMenu.classList.contains("hidden")) renderGames({ fresh: true });
-			});
-		}
-		gamesNote.textContent = `From ${source.name}, a free collection of web games.`;
-		return;
+			}),
+		);
+	}
+	if (favoriteGames.length) {
+		gamesRow("Favorites", favoriteGames, textButton("See all", () => setGamesView("favorites")));
+	}
+	gamesRow("Popular", GAMES, textButton("See all", () => setGamesView("popular")));
+	gamesRow("Multiplayer", MULTIPLAYER, textButton("See all", () => setGamesView("multiplayer")));
+
+	const shelf = document.createElement("section");
+	shelf.className = "games-row";
+	const head = document.createElement("div");
+	head.className = "games-row-head";
+	const h = document.createElement("h3");
+	h.textContent = "Collections";
+	head.append(h, textButton("Browse everything", () => setGamesView("all")));
+	const grid = document.createElement("div");
+	grid.className = "games-collections";
+	for (const source of GAME_SOURCES) grid.append(collectionTile(source));
+	shelf.append(head, grid);
+	gamesBody.append(shelf);
+
+	gamesNote.textContent = "Games open in a tab through Slow. Some need a moment to load.";
+}
+
+function collectionTile(source) {
+	const state = sourceState[source.id];
+	const tile = document.createElement("button");
+	tile.type = "button";
+	tile.className = "games-collection";
+	tile.style.setProperty("--hue", String(hueFor(source.name)));
+
+	const peek = document.createElement("span");
+	peek.className = "games-collection-peek";
+	const pictures = (state.games || []).filter((g) => g.cover && !missingCovers.has(g.cover)).slice(0, 3);
+	for (const game of pictures) peek.append(gameArt(game));
+	if (!pictures.length) {
+		const letter = document.createElement("span");
+		letter.className = "game-art letter";
+		letter.textContent = source.name.charAt(0).toUpperCase();
+		peek.append(letter);
 	}
 
-	showCoverGames(state.games, query, source.name);
+	const name = document.createElement("span");
+	name.className = "games-collection-name";
+	name.textContent = source.name;
+	const count = document.createElement("span");
+	count.className = "games-collection-count";
+	count.textContent = state.games
+		? `${state.games.length.toLocaleString()} games`
+		: state.failed
+			? "Couldn't load"
+			: "Loading…";
+
+	tile.append(peek, name, count);
+	tile.addEventListener("click", () => setGamesView(source.id));
+	if (!state.games && !state.failed) {
+		loadSource(source).then(() => {
+			if (gamesView === "home" && !gamesFilter.value.trim() && !gamesMenu.classList.contains("hidden")) refreshGames();
+		});
+	}
+	return tile;
 }
 
-// Redraws after a list finishes loading, keeping your place in the list.
-function refreshGames() {
-	const scroll = gamesGrid.scrollTop;
-	const drawn = coverDrawn;
-	renderGames();
-	while (coverDrawn < drawn && coverDrawn < coverList.length) drawMoreCovers();
-	gamesGrid.scrollTop = scroll;
-}
+/* ---------- the count, and drawing whichever list is open ---------- */
+
+// Every game on every tab (each counted once), growing as lists load.
+const gamesTotal = document.getElementById("games-total");
+let allCache = { key: "", games: [] };
 
 // Every game on every tab, each once, A to Z (names that start with a symbol go last).
 function allGames() {
+	const key = GAME_SOURCES.map((s) => sourceState[s.id].games?.length ?? "-").join(",");
+	if (allCache.key === key) return allCache.games;
 	const seen = new Set();
 	const games = [];
 	const add = (game) => {
@@ -4047,26 +4760,113 @@ function allGames() {
 	MULTIPLAYER.forEach((g) => add({ ...g, from: "Multiplayer" }));
 	loadedSourceGames().forEach(add);
 	const odd = (g) => !/^[a-z0-9]/i.test(g.name);
-	return games.sort((a, b) => odd(a) - odd(b) || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+	games.sort((a, b) => odd(a) - odd(b) || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+	allCache = { key, games };
+	return games;
 }
 
-/* ---------- cover grid: more cards are drawn as you scroll near the end ---------- */
+const allGamesCount = () => allGames().length;
 
-let coverList = []; // what the open tab is showing, in order
+function showGamesTotal() {
+	const loading = GAME_SOURCES.some((s) => !sourceState[s.id].games && !sourceState[s.id].failed);
+	const total = `${allGamesCount().toLocaleString()}${loading ? "+" : ""}`;
+	gamesTotal.textContent = `${total} games`;
+	gamesFilter.placeholder = gamesView === "home" || gamesView === "all" ? `Search ${total} games` : `Search ${viewInfo(gamesView)?.name || "games"}`;
+}
+
+// `fresh` (opening the page or switching lists) plays the cards' fade-in; typing doesn't, so results don't flicker.
+function renderGames({ fresh = false } = {}) {
+	showGamesTotal();
+	updateViewCounts();
+	const query = gamesFilter.value.trim();
+	gamesClear.hidden = !query;
+	gamesBody.textContent = "";
+	gamesBody.classList.toggle("animate", fresh);
+	coverList = [];
+	coverDrawn = 0;
+
+	if (gamesView === "home") {
+		// Searching from Home looks through every game.
+		if (query) return showCoverGames(allGames(), query, "");
+		return renderHome();
+	}
+
+	const info = viewInfo(gamesView);
+	if (!query) gamesSectionHead(info.name, info.blurb || `A free collection of web games, from ${info.name}.`);
+
+	if (CARD_LISTS[gamesView]) return showCoverGames(CARD_LISTS[gamesView], query, info.name);
+
+	if (gamesView === "favorites") {
+		if (!favoriteGames.length) {
+			gamesMessage("Nothing saved yet. Point at any game and press its heart, and it'll wait for you here.");
+			gamesNote.textContent = "";
+			return;
+		}
+		return showCoverGames(favoriteGames, query, "Favorites");
+	}
+
+	if (gamesView === "all") {
+		for (const s of GAME_SOURCES.filter((s) => !sourceState[s.id].games && !sourceState[s.id].failed)) {
+			loadSource(s).then(() => {
+				if (gamesView === "all" && !gamesMenu.classList.contains("hidden")) refreshGames();
+			});
+		}
+		return showCoverGames(allGames(), query, "");
+	}
+
+	const state = sourceState[info.id];
+	if (!state.games) {
+		if (state.failed) {
+			const p = gamesMessage(`Couldn't reach ${info.name} right now. Their site may be down or blocked. `);
+			p.append(
+				textButton("Try again", () => {
+					state.failed = false;
+					renderGames();
+				}),
+			);
+		} else {
+			gamesMessage(`Loading ${info.name} games…`);
+			loadSource(info).then(() => {
+				if (gamesView === info.id && !gamesMenu.classList.contains("hidden")) renderGames({ fresh: true });
+			});
+		}
+		gamesNote.textContent = "";
+		return;
+	}
+	showCoverGames(state.games, query, info.name);
+}
+
+// Redraws after a list finishes loading, keeping your place.
+function refreshGames() {
+	const scroll = gamesBody.scrollTop;
+	const drawn = coverDrawn;
+	renderGames();
+	while (coverDrawn < drawn && coverDrawn < coverList.length) drawMoreCovers();
+	gamesBody.scrollTop = scroll;
+}
+
+/* ---------- grids: more cards are drawn as you scroll near the end ---------- */
+
+let coverList = []; // what the open list is showing, in order
 let coverDrawn = 0; // how many of those have cards so far
+let coverGrid = null;
 const moreSentinel = document.createElement("div");
 moreSentinel.className = "games-sentinel";
 const moreObserver = new IntersectionObserver(
 	(entries) => {
 		if (entries.some((e) => e.isIntersecting)) drawMoreCovers();
 	},
-	{ root: gamesGrid, rootMargin: "0px 0px 900px 0px" },
+	{ root: gamesBody, rootMargin: "0px 0px 900px 0px" },
 );
 
 function drawMoreCovers() {
 	const next = coverList.slice(coverDrawn, coverDrawn + SOURCE_PAGE);
 	const cards = document.createDocumentFragment();
-	next.forEach((game, i) => cards.append(coverCard(game, coverDrawn + i)));
+	// In All (and search results from Home), each card says where it's from; elsewhere, its kind.
+	const showFrom = gamesView === "all" || gamesView === "home" || gamesView === "favorites";
+	next.forEach((game, i) =>
+		cards.append(gameCard(game, coverDrawn + i, { meta: showFrom ? game.from || game.tag || "" : game.tag || "" })),
+	);
 	moreSentinel.before(cards);
 	coverDrawn += next.length;
 	moreObserver.unobserve(moreSentinel);
@@ -4075,19 +4875,23 @@ function drawMoreCovers() {
 	else moreSentinel.remove();
 }
 
-// `name` is the collection's (blank for All).
+// `name` is the list's (blank for All and for searching everything).
 function showCoverGames(games, query, name) {
 	coverList = searchGames(games, query);
 	coverDrawn = 0;
-	gamesGrid.append(moreSentinel);
+	if (query) gamesSectionHead(`Results for “${query}”`, `${coverList.length.toLocaleString()} of ${games.length.toLocaleString()} games`);
+	coverGrid = document.createElement("div");
+	coverGrid.className = "games-grid";
+	coverGrid.append(moreSentinel);
+	gamesBody.append(coverGrid);
 	if (coverList.length) drawMoreCovers();
 	else if (query) noMatches(query);
 	else gamesMessage("Loading games…");
 
 	if (query) {
-		gamesNote.textContent = `${coverList.length.toLocaleString()} of ${games.length.toLocaleString()} games`;
+		gamesNote.textContent = "Enter opens the first one.";
 	} else if (name) {
-		gamesNote.textContent = `${games.length.toLocaleString()} games from ${name}.`;
+		gamesNote.textContent = `${games.length.toLocaleString()} games in ${name}.`;
 	} else {
 		const from = GAME_SOURCES.filter((s) => sourceState[s.id].games).map((s) => s.name);
 		gamesNote.textContent = `${games.length.toLocaleString()} games from ${new Intl.ListFormat("en").format(["Slow's picks", ...from])}.`;
@@ -4100,12 +4904,8 @@ function setGamesView(view) {
 		localStorage.setItem(GAMES_VIEW_KEY, view);
 	} catch {}
 	renderGames({ fresh: true });
-	gamesGrid.scrollTop = 0;
+	gamesBody.scrollTop = 0;
 	gamesFilter.focus();
-}
-
-for (const btn of gamesViewBtns) {
-	btn.addEventListener("click", () => setGamesView(btn.dataset.view));
 }
 
 function setGamesMenu(open) {
@@ -4113,11 +4913,18 @@ function setGamesMenu(open) {
 	gamesMenu.classList.toggle("hidden", !open);
 	gamesBtn.setAttribute("aria-expanded", String(open));
 	gamesBtn.classList.toggle("on", open);
-	if (!open) window.__slowStarfield?.();
+	if (!open) {
+		// Let go of the cards (and their pictures) while the page is closed.
+		gamesBody.textContent = "";
+		coverList = [];
+		coverDrawn = 0;
+		window.__slowStarfield?.();
+	}
 	if (open) {
 		gamesFilter.value = "";
+		pickFeatured();
 		renderGames({ fresh: true });
-		gamesGrid.scrollTop = 0;
+		gamesBody.scrollTop = 0;
 		gamesFilter.focus();
 	}
 }
@@ -4129,25 +4936,220 @@ gamesBtn.addEventListener("click", (event) => {
 
 document.getElementById("games-close").addEventListener("click", () => setGamesMenu(false));
 
-// The movies and music buttons next to games on the new tab page.
-// (Aether's own /noads page turns its ads off, saves that, and goes on to its home page.)
-const HOME_APPS = {
-	"btn-movies": "https://aether.st/noads",
-	"btn-music": "https://open.spotify.com/",
+/* ============================================================
+   APPS: movies, music, cloud games and games open inside Slow
+   They fill Slow's window with their own slim bar instead of being a website in a tab.
+   Music keeps playing when you close it (open it again to get back to it); the others stop.
+   ============================================================ */
+
+const iconOf = (buttonId) => () => document.querySelector(`#${buttonId} svg`).cloneNode(true);
+
+const APPS = {
+	// (Aether's own /noads page turns its ads off, saves that, and goes on to its home page.)
+	movies: { name: "Movies", sub: "Aether", url: "https://aether.st/noads", icon: iconOf("btn-movies"), button: "btn-movies" },
+	music: { name: "Music", sub: "Spotify", url: "https://open.spotify.com/", icon: iconOf("btn-music"), button: "btn-music", keep: true },
+	cloud: {
+		name: "Cloud games",
+		sub: "Niche",
+		url: "https://churchofmoses.b-cdn.net/launcher.html",
+		icon: iconOf("btn-cloud"),
+		button: "btn-cloud",
+	},
 };
-for (const [id, url] of Object.entries(HOME_APPS)) {
-	document.getElementById(id).addEventListener("click", () => navigate(activeTab(), url));
+
+const appView = document.getElementById("app-view");
+const appBody = document.getElementById("app-body");
+const appVeil = document.getElementById("app-veil");
+const appVeilText = document.getElementById("app-veil-text");
+const runningApps = new Map(); // id -> { app, frame, loaded }
+let shownApp = null;
+
+async function openApp(id, app = APPS[id]) {
+	setGamesMenu(false);
+	if (palette.open) palette.close();
+	let run = runningApps.get(id);
+	// A different game in the game slot: the old one stops.
+	if (run && run.app.url !== app.url) {
+		stopApp(id);
+		run = null;
+	}
+
+	document.getElementById("app-title").textContent = app.name;
+	document.getElementById("app-sub").textContent = app.sub || "";
+	document.getElementById("app-icon").replaceChildren(app.icon());
+	document.getElementById("app-back").title = "Back";
+	appView.classList.remove("hidden");
+	shownApp = id;
+	for (const [key, other] of runningApps) other.frame.frame.hidden = key !== id;
+	raiseTrail();
+
+	if (!run) {
+		appVeilText.textContent = `Opening ${app.name}…`;
+		appVeil.hidden = false;
+		try {
+			await ensureReady();
+		} catch (err) {
+			appView.classList.add("hidden");
+			showError("Slow could not start the proxy.", err.toString());
+			return;
+		}
+		const frame = scramjet.createFrame();
+		frame.frame.className = "app-frame";
+		frame.frame.setAttribute("allow", "autoplay; fullscreen; gamepad; encrypted-media; picture-in-picture; clipboard-write");
+		run = { app, frame, loaded: false };
+		trailStart(trailOf(run), app.url);
+		runningApps.set(id, run);
+		appBody.append(frame.frame);
+		frame.frame.addEventListener("load", () => {
+			run.loaded = true;
+			if (shownApp === id) appVeil.hidden = true;
+		});
+		frame.go(app.url);
+	} else {
+		appVeil.hidden = run.loaded;
+	}
+	showRunningApps();
 }
+
+function stopApp(id) {
+	const run = runningApps.get(id);
+	if (!run) return;
+	run.frame.frame.remove();
+	runningApps.delete(id);
+	showRunningApps();
+}
+
+function closeApp({ toGames = false } = {}) {
+	if (!shownApp) return;
+	const id = shownApp;
+	const run = runningApps.get(id);
+	shownApp = null;
+	appView.classList.add("hidden");
+	if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+	if (run?.app.keep) {
+		run.frame.frame.hidden = true;
+		notify(`${run.app.name} keeps playing. Open it again from the new tab page to get back to it.`, [
+			{ label: "Stop it", run: () => stopApp(id) },
+		]);
+	} else {
+		stopApp(id);
+	}
+	showRunningApps();
+	if (toGames) setGamesMenu(true);
+}
+
+// A dot on the new tab page's button while an app keeps running in the background (music).
+function showRunningApps() {
+	for (const [id, app] of Object.entries(APPS)) {
+		document.getElementById(app.button).classList.toggle("running", runningApps.has(id) && shownApp !== id);
+	}
+}
+
+for (const [id, app] of Object.entries(APPS)) {
+	document.getElementById(app.button).addEventListener("click", () => openApp(id));
+}
+
+document.getElementById("app-close").addEventListener("click", () => closeApp());
+document.getElementById("app-back").addEventListener("click", () => appStep(shownApp, -1));
+
+// Back (or forward) in an app's own pages; back from its first page of a game returns to the games.
+function appStep(id, step) {
+	const run = runningApps.get(id);
+	if (!run) return;
+	const url = trailStep(trailOf(run), step);
+	if (url) {
+		appVeil.hidden = false;
+		run.loaded = false;
+		run.frame.go(url);
+	} else if (step < 0 && run.app.backToGames) {
+		closeApp({ toGames: true });
+	}
+}
+
+// Apps' pages change as you use them; their history follows.
+setInterval(() => {
+	for (const run of runningApps.values()) {
+		try {
+			const url = run.frame.url.href;
+			if (/^https?:\/\//.test(url)) trailSaw(trailOf(run), url);
+		} catch {}
+	}
+}, 500);
+
+// The mouse's back and forward buttons, pressed inside a website (browsing.js passes them on):
+// back or forward in whichever tab or app that website is in.
+window.__slowStep = (frameWindow, step) => {
+	const tab = tabs.find((t) => t.frame?.frame.contentWindow === frameWindow);
+	if (tab) {
+		if (tab.id !== activeId) activate(tab.id);
+		frameAction(step < 0 ? "back" : "forward");
+		return true;
+	}
+	for (const [id, run] of runningApps) {
+		if (run.frame.frame.contentWindow === frameWindow) {
+			appStep(id, step);
+			return true;
+		}
+	}
+	return false;
+};
+
+// The mouse's back and forward buttons on Slow's own bar: the open tab's (or app's) history,
+// not the browser's single history for every tab.
+for (const type of ["mousedown", "mouseup"]) {
+	document.addEventListener(
+		type,
+		(event) => {
+			if (event.button !== 3 && event.button !== 4) return;
+			event.preventDefault();
+			if (type !== "mouseup") return;
+			const step = event.button === 3 ? -1 : 1;
+			if (shownApp) appStep(shownApp, step);
+			else frameAction(step < 0 ? "back" : "forward");
+		},
+		true,
+	);
+}
+document.getElementById("app-reload").addEventListener("click", () => {
+	const run = runningApps.get(shownApp);
+	if (!run) return;
+	appVeil.hidden = false;
+	run.loaded = false;
+	run.frame.reload();
+});
+document.getElementById("app-full").addEventListener("click", () => {
+	if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+	else appBody.requestFullscreen().catch(() => {});
+});
+// Out of the app view and into an ordinary tab, on the page it's showing now.
+document.getElementById("app-tab").addEventListener("click", () => {
+	const id = shownApp;
+	const run = runningApps.get(id);
+	if (!run) return;
+	let url = run.app.url;
+	try {
+		url = run.frame.url.href;
+	} catch {}
+	shownApp = null;
+	appView.classList.add("hidden");
+	stopApp(id);
+	const tab = newTab();
+	if (tab) navigate(tab, url, { here: true });
+});
+
+document.addEventListener("keydown", (event) => {
+	if (event.key === "Escape" && shownApp && !appView.classList.contains("hidden") && !document.fullscreenElement) closeApp();
+});
 
 gamesFilter.addEventListener("input", () => {
 	renderGames();
-	gamesGrid.scrollTop = 0;
+	gamesBody.scrollTop = 0;
 });
 
 function clearGamesSearch() {
 	gamesFilter.value = "";
 	renderGames();
-	gamesGrid.scrollTop = 0;
+	gamesBody.scrollTop = 0;
 	gamesFilter.focus();
 }
 
@@ -4157,8 +5159,14 @@ gamesClear.addEventListener("click", clearGamesSearch);
 gamesFilter.addEventListener("keydown", (event) => {
 	if (event.key === "Enter") {
 		event.preventDefault();
-		gamesGrid.querySelector(".game")?.click();
+		gamesBody.querySelector(".game-open")?.click();
 	}
+});
+
+// The dice: a random game from whatever is showing (search results, the open list, or everything).
+document.getElementById("games-random").addEventListener("click", () => {
+	const pool = coverList.length ? coverList : gamesView === "favorites" && favoriteGames.length ? favoriteGames : allGames();
+	if (pool.length) openGame(pool[Math.floor(Math.random() * pool.length)]);
 });
 
 document.addEventListener("keydown", (event) => {
@@ -4193,6 +5201,217 @@ document.addEventListener("pointerover", (event) => {
 	const pitch = HOVER_PITCH.find(([selector]) => target.matches(selector))?.[1] ?? 1;
 	sfx.hover(pitch);
 });
+
+/* ============================================================
+   CHAT
+   The chat (chat/) opens full screen, like the other apps, or (Settings > Chat) in a panel
+   on the right beside the page you're on. Once you've signed in, Slow connects it in the
+   background when it opens, so messages and calls reach you while it's closed.
+   ============================================================ */
+
+const chatBtn = document.getElementById("btn-chat");
+const chatBadge = chatBtn.querySelector(".chat-badge");
+const chatDock = document.getElementById("chat-dock");
+const chatGrip = document.getElementById("chat-grip");
+const chatCall = document.getElementById("chat-call");
+const CHAT_WIDTH_KEY = "slow.chatWidth";
+let chatCallState = null;
+
+const chatDocked = () => settings.chatMode === "dock";
+let chatFrame = null;
+let chatWide = false; // bigger for a while, during a call
+
+
+function savedChatWidth() {
+	try {
+		const width = Number(localStorage.getItem(CHAT_WIDTH_KEY));
+		if (width >= 300) return width;
+	} catch {}
+	return 380;
+}
+
+// The page beside the chat keeps at least 360px.
+const chatMaxWidth = () => Math.max(320, Math.min(980, window.innerWidth - 360));
+
+function applyChatWidth(width = savedChatWidth()) {
+	const wanted = chatWide ? Math.max(width, 760) : width;
+	document.documentElement.style.setProperty("--chat-w", `${Math.round(Math.min(chatMaxWidth(), Math.max(320, wanted)))}px`);
+}
+applyChatWidth();
+window.addEventListener("resize", () => applyChatWidth());
+
+function loadChat() {
+	if (chatFrame) return chatFrame;
+	chatFrame = document.createElement("iframe");
+	chatFrame.className = "chat-frame";
+	chatFrame.title = "Chat";
+	// (calls need the microphone and camera)
+	chatFrame.setAttribute("allow", "microphone; camera; autoplay; clipboard-write; display-capture");
+	chatFrame.src = new URL("chat/index.html", location.href).href;
+	chatDock.append(chatFrame);
+	return chatFrame;
+}
+
+// Runs once the chat's page is ready (straight away if it already is).
+function withChat(run) {
+	const api = chatFrame?.contentWindow?.__chat;
+	if (api) run(api);
+	else chatFrame?.addEventListener("load", () => chatFrame.contentWindow?.__chat && run(chatFrame.contentWindow.__chat), { once: true });
+}
+
+// Full screen, or a panel beside the page (which moves over to make room).
+function applyChatMode() {
+	const docked = chatDocked();
+	chatDock.classList.toggle("full", !docked);
+	document.body.classList.toggle("chat-docked", docked && !chatDock.hidden);
+	if (!docked) chatWide = false;
+	applyChatWidth();
+	withChat((api) => api.modeChanged?.());
+}
+
+function setChatMode(mode) {
+	settings.chatMode = mode === "dock" ? "dock" : "full";
+	saveSettings();
+	applyChatMode();
+}
+
+function openChat(convId) {
+	loadChat();
+	if (chatDock.hidden) {
+		chatDock.hidden = false;
+		applyChatMode();
+		chatBtn.setAttribute("aria-expanded", "true");
+		setGamesMenu(false);
+		if (palette.open) palette.close();
+		playEnter(chatDock);
+	}
+	showChatCall();
+	withChat((api) => {
+		if (convId) api.openConv(convId);
+		api.shown();
+	});
+	chatFrame.focus();
+}
+
+function closeChat() {
+	if (chatDock.hidden) return;
+	const hadFocus = chatDock.contains(document.activeElement) || document.activeElement === chatFrame;
+	chatDock.hidden = true;
+	document.body.classList.remove("chat-docked");
+	chatBtn.setAttribute("aria-expanded", "false");
+	chatWide = false;
+	applyChatWidth();
+	showChatCall();
+	if (hadFocus) {
+		if (!home.classList.contains("hidden")) chatBtn.focus();
+		else activeTab()?.frame?.frame.focus();
+	}
+}
+
+// On a call with the chat closed: a button to get back to it.
+function showChatCall() {
+	chatCall.hidden = !chatCallState || !chatDock.hidden;
+	document.getElementById("chat-call-text").textContent = chatCallState?.text || "";
+}
+chatCall.addEventListener("click", () => openChat());
+settingsForm.addEventListener("change", (event) => {
+	if (event.target.name === "chatMode") applyChatMode();
+});
+applyChatMode();
+
+function toggleChat() {
+	if (chatDock.hidden) openChat();
+	else closeChat();
+}
+
+chatBtn.addEventListener("click", toggleChat);
+
+// What the chat asks of Slow (chat/chat.js).
+window.__slowChat = {
+	openTab: (url) => openLinkInTab(url),
+	notify(message, actions, timeout) {
+		// (never over a notice that's waiting for an answer, like "Slow was updated")
+		if (!notice.classList.contains("hidden") && !notice.classList.contains("timed")) return;
+		notify(message, actions, timeout);
+	},
+	open: openChat,
+	close: closeChat,
+	toggle: toggleChat,
+	visible: () => !chatDock.hidden && !document.hidden,
+	isDev: () => Boolean(devToken),
+	sound: (notes) => sfx.melody(notes),
+	mode: () => (chatDocked() ? "dock" : "full"),
+	setMode: setChatMode,
+	setWide(on) {
+		chatWide = Boolean(on) && chatDocked();
+		applyChatWidth();
+	},
+	// The number on the chat button (and in the window's title): chats with new messages for you.
+	setBadge(count) {
+		chatUnread = Math.max(0, Number(count) || 0);
+		chatBadge.hidden = !chatUnread;
+		chatBadge.textContent = chatUnread > 9 ? "9+" : String(chatUnread);
+		chatBtn.setAttribute("aria-label", chatUnread ? `Chat, ${chatUnread} new` : "Chat");
+		updateView();
+	},
+	setCall(state) {
+		chatCallState = state?.text ? { text: String(state.text) } : null;
+		chatBtn.classList.toggle("in-call", Boolean(chatCallState));
+		showChatCall();
+	},
+	// Someone's calling: the chat opens so you can answer.
+	incomingCall(from) {
+		chatBtn.classList.toggle("ringing", Boolean(from));
+		if (from && chatDock.hidden) openChat();
+	},
+	// Pictures from other websites, through the proxy (Slow's page can't show them directly).
+	async fetchImage(url) {
+		await ensureReady();
+		const res = await proxyFetch(url);
+		if (!res.ok) throw new Error(`The picture's website said ${res.status}`);
+		return res.blob();
+	},
+};
+
+/* ---------- making the chat wider or narrower ---------- */
+
+function setChatWidth(width) {
+	chatWide = false;
+	const clamped = Math.round(Math.min(chatMaxWidth(), Math.max(320, width)));
+	try {
+		localStorage.setItem(CHAT_WIDTH_KEY, String(clamped));
+	} catch {}
+	applyChatWidth(clamped);
+}
+
+chatGrip.addEventListener("pointerdown", (event) => {
+	if (event.button !== 0) return;
+	event.preventDefault();
+	chatGrip.setPointerCapture(event.pointerId);
+	document.body.classList.add("chat-resizing");
+	const move = (e) => setChatWidth(window.innerWidth - e.clientX);
+	const done = () => {
+		chatGrip.removeEventListener("pointermove", move);
+		document.body.classList.remove("chat-resizing");
+	};
+	chatGrip.addEventListener("pointermove", move);
+	chatGrip.addEventListener("pointerup", done, { once: true });
+	chatGrip.addEventListener("pointercancel", done, { once: true });
+});
+
+chatGrip.addEventListener("keydown", (event) => {
+	if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+	event.preventDefault();
+	const now = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--chat-w"), 10) || savedChatWidth();
+	setChatWidth(now + (event.key === "ArrowLeft" ? 24 : -24));
+});
+
+// Signed in before: connect in the background (a moment after Slow starts, so it doesn't slow that down).
+try {
+	if (localStorage.getItem("slow.chat.on") === "1") {
+		setTimeout(() => (window.requestIdleCallback || ((fn) => fn()))(loadChat, { timeout: 3000 }), 1500);
+	}
+} catch {}
 
 /* ============================================================
    EXTRA ANIMATIONS

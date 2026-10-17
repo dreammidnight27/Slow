@@ -82,6 +82,21 @@ fastify.get("/config.js", (req, reply) => {
 		.send('// Served by Slow\'s own server: websites load through this server.\nwindow.SLOW_CONFIG = { wisp: "" };\n');
 });
 
+// Share Slow's page (QR code and links for your other devices). Only this computer can open it:
+// the links hold your private key.
+const sharePage = fileURLToPath(new URL("./share.html", import.meta.url));
+const shareFile = fileURLToPath(new URL("../.slow-share.json", import.meta.url));
+
+fastify.get("/share", (req, reply) => {
+	if (!fromThisComputer(req.raw)) return reply.code(404).send();
+	reply.type("text/html").header("Cache-Control", "no-store").send(readFileSync(sharePage));
+});
+
+fastify.get("/share.json", (req, reply) => {
+	if (!fromThisComputer(req.raw) || !existsSync(shareFile)) return reply.code(404).send();
+	reply.type("application/json").header("Cache-Control", "no-store").send(readFileSync(shareFile));
+});
+
 fastify.register(fastifyStatic, {
 	root: publicPath,
 	decorateReply: true,

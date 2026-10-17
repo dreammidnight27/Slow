@@ -1,0 +1,303 @@
+/* A Slow look for the cloud gaming page (added by cloud-skin.js). Their page is built with
+   Tailwind, so these win with !important. Colors come from Slow's theme. */
+
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=Cormorant+Garamond:ital,wght@1,600&display=swap");
+
+html,
+body {
+	background:
+		radial-gradient(1100px 560px at 88% -12%, color-mix(in srgb, var(--nebula, #4a2c8f) 38%, transparent), transparent 70%),
+		radial-gradient(800px 480px at -10% 110%, color-mix(in srgb, var(--aurora, #b98cff) 10%, transparent), transparent 70%),
+		var(--void, #07050f) !important;
+	color: var(--starlight, #f3eeff) !important;
+	font-family: "DM Sans", system-ui, sans-serif !important;
+}
+
+/* their blue wrapper around everything */
+body > div:has(#gameGrid) {
+	padding: 0 !important;
+	gap: 0 !important;
+	background: transparent !important;
+}
+
+.slow-gone,
+#apiKeyInput {
+	display: none !important;
+}
+
+/* header: title, search, filters */
+.slow-cloud-head {
+	position: sticky;
+	top: 0;
+	z-index: 5;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 14px 20px;
+	width: 100%;
+	box-sizing: border-box;
+	padding: 22px clamp(16px, 4vw, 44px) 18px;
+	background: linear-gradient(var(--void, #07050f) 72%, transparent);
+}
+
+.slow-cloud-title {
+	display: flex;
+	align-items: baseline;
+	gap: 12px;
+}
+
+.slow-cloud-title h1 {
+	margin: 0;
+	font-family: "Cormorant Garamond", Georgia, serif;
+	font-style: italic;
+	font-weight: 600;
+	font-size: 38px;
+	line-height: 1;
+	color: var(--starlight, #f3eeff);
+}
+
+.slow-cloud-count {
+	font-size: 12.5px;
+	color: rgba(238, 240, 255, 0.45);
+}
+
+#gameSearch {
+	flex: 1 1 260px;
+	width: auto !important;
+	max-width: 520px;
+	height: 46px !important;
+	margin: 0 !important;
+	padding: 0 18px 0 46px !important;
+	border: 1px solid rgba(238, 240, 255, 0.1) !important;
+	border-radius: 15px !important;
+	background: rgba(238, 240, 255, 0.05)
+		url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23eef0ff' stroke-opacity='0.5' stroke-width='1.8' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='6.5'/%3E%3Cpath d='m16 16 4 4'/%3E%3C/svg%3E")
+		no-repeat 16px center / 17px !important;
+	color: var(--starlight, #f3eeff) !important;
+	font: inherit !important;
+	font-size: 14.5px !important;
+	text-align: left !important;
+	outline: none !important;
+	transition:
+		border-color 0.2s,
+		box-shadow 0.2s !important;
+}
+
+#gameSearch::placeholder {
+	color: rgba(238, 240, 255, 0.4);
+}
+
+#gameSearch:focus {
+	border-color: color-mix(in srgb, var(--aurora, #b98cff) 60%, transparent) !important;
+	box-shadow: 0 0 0 4px color-mix(in srgb, var(--aurora, #b98cff) 14%, transparent) !important;
+}
+
+.slow-cloud-chips {
+	display: flex;
+	gap: 6px;
+	margin-left: auto;
+}
+
+.slow-cloud-chips button {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	height: 36px;
+	padding: 0 14px;
+	border: 1px solid rgba(238, 240, 255, 0.1);
+	border-radius: 18px;
+	background: rgba(238, 240, 255, 0.05);
+	color: rgba(238, 240, 255, 0.72);
+	font: inherit;
+	font-size: 13px;
+	cursor: pointer;
+	transition:
+		background 0.15s,
+		color 0.15s,
+		border-color 0.15s;
+}
+
+.slow-cloud-chips button:hover {
+	background: rgba(238, 240, 255, 0.1);
+	color: var(--starlight, #f3eeff);
+}
+
+.slow-cloud-chips small {
+	font-size: 11px;
+	opacity: 0.6;
+	font-variant-numeric: tabular-nums;
+}
+
+.slow-cloud-chips button.on {
+	border-color: transparent;
+	background: var(--aurora, #b98cff);
+	color: var(--void, #07050f);
+	font-weight: 600;
+}
+
+.slow-cloud-chips button:focus-visible {
+	outline: 2px solid var(--aurora, #b98cff);
+	outline-offset: 2px;
+}
+
+/* the games */
+#gameGrid {
+	display: grid !important;
+	grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)) !important;
+	align-content: start !important;
+	justify-content: stretch !important;
+	gap: 22px 16px !important;
+	box-sizing: border-box;
+	padding: 6px clamp(16px, 4vw, 44px) 48px !important;
+}
+
+#gameGrid > .slow-card {
+	position: relative;
+	display: flex !important;
+	flex-direction: column !important;
+	align-items: stretch !important;
+	width: auto !important;
+	height: auto !important;
+	margin: 0 !important;
+	padding: 0 !important;
+	border-radius: 0 !important;
+	background: none !important;
+	cursor: pointer;
+	content-visibility: auto;
+	contain-intrinsic-size: auto 190px auto 180px;
+}
+
+#gameGrid > .slow-card img {
+	display: block;
+	width: 100% !important;
+	height: auto !important;
+	aspect-ratio: 16 / 10;
+	object-fit: cover;
+	border-radius: 14px !important;
+	background: rgba(238, 240, 255, 0.05);
+	box-shadow: 0 0 0 1px rgba(238, 240, 255, 0.08);
+	transition:
+		transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+		box-shadow 0.3s ease;
+}
+
+/* phone game icons are square: show them whole on a soft panel instead of cropping them */
+#gameGrid > .slow-card[data-kind="phone"] img {
+	box-sizing: border-box;
+	padding: 9% 0;
+	object-fit: contain;
+	background: radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--aurora, #b98cff) 18%, transparent), rgba(238, 240, 255, 0.04) 70%);
+}
+
+#gameGrid > .slow-card:hover img {
+	transform: translateY(-4px);
+	box-shadow:
+		0 16px 34px -14px color-mix(in srgb, var(--aurora, #b98cff) 70%, transparent),
+		0 0 0 1px color-mix(in srgb, var(--aurora, #b98cff) 50%, transparent);
+}
+
+#gameGrid > .slow-card h3 {
+	margin: 10px 0 0 !important;
+	overflow: hidden;
+	color: var(--starlight, #f3eeff) !important;
+	font-size: 14px !important;
+	font-weight: 500 !important;
+	text-align: left !important;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+#gameGrid > .slow-card p {
+	margin: 2px 0 0 !important;
+	color: rgba(238, 240, 255, 0.5) !important;
+	font-size: 12px !important;
+	text-align: left !important;
+	text-transform: capitalize;
+}
+
+.slow-badge {
+	position: absolute;
+	top: 8px;
+	left: 8px;
+	padding: 2px 8px;
+	border-radius: 8px;
+	background: rgba(8, 6, 18, 0.72);
+	backdrop-filter: blur(6px);
+	color: #fff;
+	font-size: 10.5px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	pointer-events: none;
+}
+
+.slow-hidden {
+	display: none !important;
+}
+
+.slow-cloud-empty {
+	margin: 40px 0;
+	text-align: center;
+	color: rgba(238, 240, 255, 0.5);
+	font-size: 14px;
+}
+
+.slow-cloud-empty[hidden] {
+	display: none;
+}
+
+/* the game screen while it loads, and its close button */
+#nicheOverlay {
+	background: var(--void, #07050f) !important;
+}
+
+#nicheLoading > div:first-child {
+	width: 46px !important;
+	height: 46px !important;
+	border-color: rgba(238, 240, 255, 0.14) !important;
+	border-top-color: var(--aurora, #b98cff) !important;
+}
+
+#nicheLoadingText {
+	font-family: "Cormorant Garamond", Georgia, serif !important;
+	font-style: italic;
+	font-size: 30px !important;
+	font-weight: 600 !important;
+	color: var(--starlight, #f3eeff);
+}
+
+#nicheStatusSub {
+	color: rgba(238, 240, 255, 0.55) !important;
+	font-size: 13.5px !important;
+}
+
+#nicheCloseBtn {
+	top: 14px !important;
+	right: 14px !important;
+	z-index: 10;
+	height: 38px;
+	padding: 0 18px !important;
+	border: 1px solid rgba(255, 255, 255, 0.18) !important;
+	border-radius: 19px !important;
+	background: rgba(8, 6, 18, 0.72) !important;
+	backdrop-filter: blur(8px);
+	color: #fff !important;
+	font: 500 13.5px "DM Sans", system-ui, sans-serif !important;
+	cursor: pointer;
+}
+
+#nicheCloseBtn:hover {
+	border-color: rgba(255, 140, 140, 0.5) !important;
+	background: rgba(120, 30, 40, 0.75) !important;
+}
+
+@media (max-width: 640px) {
+	.slow-cloud-chips {
+		margin-left: 0;
+		overflow-x: auto;
+	}
+
+	#gameGrid {
+		grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)) !important;
+		gap: 18px 12px !important;
+	}
+}

@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Chat · Slow</title>
+		<link rel="icon" href="../favicon.svg?v=3" type="image/svg+xml" />
+		<link rel="stylesheet" href="chat.css?v=1" />
+		<script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-app-compat.js" crossorigin="anonymous" defer></script>
+		<script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-auth-compat.js" crossorigin="anonymous" defer></script>
+		<script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-database-compat.js" crossorigin="anonymous" defer></script>
+		<script src="chat.js?v=1" defer></script>
+	</head>
+
+	<body>
+		<!-- Shown until Slow knows whether you're signed in -->
+		<div id="boot" class="boot" aria-live="polite">
+			<span class="orbit" aria-hidden="true"></span>
+			<p id="boot-text">Connecting to chat…</p>
+		</div>
+
+		<!-- Signing in -->
+		<section id="auth" class="auth" hidden>
+			<button id="auth-close" class="icon-btn auth-close" type="button" aria-label="Close chat" data-close-dock>
+				<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+			</button>
+			<div class="auth-card">
+				<svg class="auth-art" viewBox="0 0 64 64" aria-hidden="true">
+					<path class="bubble-back" d="M22 14h28a8 8 0 0 1 8 8v14a8 8 0 0 1-8 8h-3l1 7-9-7H22a8 8 0 0 1-8-8V22a8 8 0 0 1 8-8Z" />
+					<path class="bubble-front" d="M10 24h26a7 7 0 0 1 7 7v12a7 7 0 0 1-7 7H19l-8 6 1-6h-2a7 7 0 0 1-7-7V31a7 7 0 0 1 7-7Z" />
+					<circle cx="16" cy="37" r="2" /><circle cx="23" cy="37" r="2" /><circle cx="30" cy="37" r="2" />
+				</svg>
+				<h1 class="auth-title" id="auth-title">Chat</h1>
+				<p class="auth-blurb" id="auth-blurb">Talk with everyone on Slow while you browse and play.</p>
+
+				<div class="auth-tabs" role="tablist" aria-label="Sign in or sign up">
+					<button id="tab-login" class="auth-tab" type="button" role="tab" aria-selected="true">Log in</button>
+					<button id="tab-signup" class="auth-tab" type="button" role="tab" aria-selected="false">Sign up</button>
+				</div>
+
+				<form id="auth-form" class="auth-form" novalidate>
+					<label class="field" id="name-field" hidden>
+						<span>Username</span>
+						<input id="auth-name" type="text" maxlength="24" autocomplete="nickname" spellcheck="false" placeholder="What people will see" />
+					</label>
+					<label class="field">
+						<span>Email</span>
+						<input id="auth-email" type="email" autocomplete="email" spellcheck="false" placeholder="you@example.com" />
+					</label>
+					<label class="field">
+						<span>Password</span>
+						<span class="password">
+							<input id="auth-password" type="password" autocomplete="current-password" placeholder="At least 6 characters" />
+							<button id="auth-peek" class="peek" type="button" aria-label="Show password" aria-pressed="false">
+								<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" /><circle cx="12" cy="12" r="3" /></svg>
+							</button>
+						</span>
+					</label>
+					<p id="auth-error" class="form-error" role="alert" hidden></p>
+					<button id="auth-submit" class="btn primary wide" type="submit">Log in</button>
+					<button id="auth-forgot" class="link-btn" type="button">Forgot your password?</button>
+				</form>
+			</div>
+		</section>
+
+		<!-- The chat -->
+		<div id="shell" class="shell" hidden>
+			<aside class="side" aria-label="Conversations">
+				<header class="side-head">
+					<h1 class="side-title">Chat</h1>
+					<button id="btn-new-dm" class="icon-btn" type="button" aria-label="New message" title="New message">
+						<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16Z" /><path d="m13.5 6.5 4 4" /></svg>
+					</button>
+					<button id="btn-new-group" class="icon-btn" type="button" aria-label="New group" title="New group">
+						<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3.2" /><path d="M3.5 19a5.5 5.5 0 0 1 11 0" /><path d="M18 8v6M15 11h6" /></svg>
+					</button>
+					<button class="icon-btn" type="button" data-mode-toggle hidden></button>
+					<button class="icon-btn" type="button" aria-label="Close chat" title="Close chat (Alt+C)" data-close-dock>
+						<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+					</button>
+				</header>
+
+				<label class="find">
+					<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg>
+					<input id="find" type="search" placeholder="Find a chat" autocomplete="off" spellcheck="false" aria-label="Find a chat" />
+				</label>
+
+				<section class="online" aria-labelledby="online-title">
+					<h2 id="online-title" class="label">Online <span id="online-count"></span></h2>
+					<div id="online-list" class="online-list"></div>
+				</section>
+
+				<nav id="convs" class="convs" aria-label="Chats"></nav>
+
+				<footer class="me">
+					<button id="me-open" class="me-open" type="button" title="Your profile">
+						<span id="me-avatar" class="avatar-slot"></span>
+						<span class="me-text">
+							<span id="me-name" class="me-name"></span>
+							<span id="me-sub" class="me-sub"></span>
+						</span>
+					</button>
+					<button id="me-menu" class="icon-btn" type="button" aria-label="Chat options" aria-haspopup="menu" aria-expanded="false">
+						<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle class="fill" cx="5.5" cy="12" r="1.6" /><circle class="fill" cx="12" cy="12" r="1.6" /><circle class="fill" cx="18.5" cy="12" r="1.6" /></svg>
+					</button>
+				</footer>
+			</aside>
+
+			<main class="room" aria-labelledby="room-title">
+				<header class="room-head">
+					<button id="room-back" class="icon-btn room-back" type="button" aria-label="All chats">
+						<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
+					</button>
+					<span id="room-avatar" class="avatar-slot room-avatar"></span>
+					<button id="room-info" class="room-info" type="button">
+						<span id="room-title" class="room-title"></span>
+						<span id="room-sub" class="room-sub"></span>
+					</button>
+					<div class="room-actions">
+						<button id="call-join" class="join-call" type="button" hidden></button>
+						<button id="btn-voice" class="icon-btn" type="button" aria-label="Voice call" title="Voice call" hidden>
+							<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 3.5h2.6l1.4 4.2-2 1.5a11 11 0 0 0 6.2 6.2l1.5-2 4.2 1.4v2.6a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 4.6 5.7a2 2 0 0 1 2-2.2Z" /></svg>
+						</button>
+						<button id="btn-video" class="icon-btn" type="button" aria-label="Video call" title="Video call" hidden>
+							<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6.5" width="12.5" height="11" rx="2.5" /><path d="m15.5 10.5 5.5-3v9l-5.5-3" /></svg>
+						</button>
+						<button id="btn-room-menu" class="icon-btn" type="button" aria-label="Chat options" aria-haspopup="menu" aria-expanded="false" hidden>
+							<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle class="fill" cx="12" cy="5.5" r="1.6" /><circle class="fill" cx="12" cy="12" r="1.6" /><circle class="fill" cx="12" cy="18.5" r="1.6" /></svg>
+						</button>
+						<button class="icon-btn room-close" type="button" data-mode-toggle hidden></button>
+						<button class="icon-btn room-close" type="button" aria-label="Close chat" title="Close chat (Alt+C)" data-close-dock>
+							<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+						</button>
+					</div>
+				</header>
+
+				<div id="feed" class="feed" tabindex="-1">
+					<div id="feed-top" class="feed-top"></div>
+					<ol id="msgs" class="msgs" aria-live="polite" aria-relevant="additions"></ol>
+				</div>
+				<button id="jump" class="jump" type="button" hidden>
+					<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" /></svg>
+					<span id="jump-text">Latest</span>
+				</button>
+
+				<div id="typing" class="typing" aria-live="polite"></div>
+
+				<form id="composer" class="composer" novalidate>
+					<div id="reply-bar" class="reply-bar" hidden>
+						<span class="reply-to"><span id="reply-label"></span> <span id="reply-text" class="reply-snippet"></span></span>
+						<button id="reply-cancel" class="icon-btn small" type="button" aria-label="Stop replying">
+							<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
+						</button>
+					</div>
+					<ul id="cmd-hint" class="cmd-hint" role="listbox" hidden></ul>
+					<div class="composer-row">
+						<textarea id="text" rows="1" maxlength="500" placeholder="Message" autocomplete="off" aria-label="Message"></textarea>
+						<button id="send" class="send" type="submit" aria-label="Send" disabled>
+							<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M12 6l6 6-6 6" /></svg>
+						</button>
+					</div>
+					<span id="count" class="count" hidden></span>
+				</form>
+			</main>
+		</div>
+
+		<!-- Menus -->
+		<div id="menu" class="menu" role="menu" hidden></div>
+
+		<!-- Hover actions on a message -->
+		<div id="msg-tools" class="msg-tools" hidden>
+			<div id="msg-react" class="msg-react"></div>
+			<button id="tool-reply" class="tool" type="button" title="Reply" aria-label="Reply">
+				<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 8 5 12.5l5 4.5" /><path d="M5.5 12.5H14a5 5 0 0 1 5 5V19" /></svg>
+			</button>
+			<button id="tool-copy" class="tool" type="button" title="Copy text" aria-label="Copy text">
+				<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5" /><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2" /></svg>
+			</button>
+			<button id="tool-delete" class="tool danger" type="button" title="Delete" aria-label="Delete message">
+				<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 4h4M7 7l1 12.5h8L17 7" /></svg>
+			</button>
+		</div>
+
+		<!-- Someone's profile -->
+		<dialog id="profile" class="sheet" aria-labelledby="pf-name">
+			<div class="profile-banner" id="pf-banner"></div>
+			<div class="profile-top">
+				<span id="pf-avatar" class="avatar-slot"></span>
+				<div class="profile-names">
+					<h2 id="pf-name" class="profile-name"></h2>
+					<p id="pf-status" class="profile-status"></p>
+					<div id="pf-tags" class="tags"></div>
+				</div>
+			</div>
+			<div class="level-card">
+				<div class="level-row"><span id="pf-rank" class="rank"></span><span id="pf-level" class="level-num"></span></div>
+				<div class="xp-track"><div id="pf-xp" class="xp-fill"></div></div>
+				<div class="level-row muted"><span id="pf-xp-text"></span></div>
+				<dl class="facts">
+					<div><dt>Messages</dt><dd id="pf-count"></dd></div>
+					<div><dt>Joined</dt><dd id="pf-since"></dd></div>
+				</dl>
+			</div>
+			<p id="pf-bio" class="bio"></p>
+			<div class="sheet-actions">
+				<button id="pf-voice" class="btn" type="button">Voice</button>
+				<button id="pf-video" class="btn" type="button">Video</button>
+				<button id="pf-message" class="btn primary" type="button">Message</button>
+				<button id="pf-edit" class="btn primary" type="button">Edit profile</button>
+			</div>
+			<button class="icon-btn sheet-x" type="button" aria-label="Close" data-close>
+				<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+			</button>
+		</dialog>
+
+		<!-- Editing your profile -->
+		<dialog id="edit" class="sheet" aria-labelledby="edit-title">
+			<h2 id="edit-title" class="sheet-title">Your profile</h2>
+			<div class="edit-pic">
+				<span id="edit-avatar" class="avatar-slot"></span>
+				<div class="edit-pic-actions">
+					<label class="btn" for="edit-file">Choose a picture</label>
+					<input id="edit-file" type="file" accept="image/*" hidden />
+					<button id="edit-remove" class="link-btn" type="button">Remove picture</button>
+				</div>
+			</div>
+			<label class="field">
+				<span>Or paste a picture's link</span>
+				<input id="edit-url" type="url" placeholder="https://…" autocomplete="off" spellcheck="false" />
+			</label>
+			<label class="field">
+				<span>Bio <em id="edit-count" class="field-count">0/240</em></span>
+				<textarea id="edit-bio" rows="3" maxlength="240" placeholder="Tell people something about you"></textarea>
+			</label>
+			<p id="edit-error" class="form-error" role="alert" hidden></p>
+			<div class="sheet-actions">
+				<button class="btn quiet" type="button" data-close>Cancel</button>
+				<button id="edit-save" class="btn primary" type="button">Save</button>
+			</div>
+		</dialog>
+
+		<!-- Starting a conversation with someone -->
+		<dialog id="new-dm" class="sheet" aria-labelledby="new-dm-title">
+			<h2 id="new-dm-title" class="sheet-title">New message</h2>
+			<label class="field">
+				<span>Who to message</span>
+				<input id="new-dm-name" type="text" placeholder="Their username" autocomplete="off" spellcheck="false" />
+			</label>
+			<div id="new-dm-results" class="people"></div>
+			<p id="new-dm-error" class="form-error" role="alert" hidden></p>
+			<div class="sheet-actions">
+				<button class="btn quiet" type="button" data-close>Cancel</button>
+			</div>
+		</dialog>
+
+		<!-- Making a group, or adding people to one -->
+		<dialog id="group" class="sheet" aria-labelledby="group-title">
+			<h2 id="group-title" class="sheet-title">New group</h2>
+			<label class="field" id="group-name-field">
+				<span>Group name <em>(optional)</em></span>
+				<input id="group-name" type="text" maxlength="40" placeholder="Weekend plans" autocomplete="off" />
+			</label>
+			<label class="field">
+				<span>Add people</span>
+				<input id="group-find" type="text" placeholder="Search usernames" autocomplete="off" spellcheck="false" />
+			</label>
+			<div id="group-people" class="people picker"></div>
+			<p id="group-error" class="form-error" role="alert" hidden></p>
+			<div class="sheet-actions">
+				<button class="btn quiet" type="button" data-close>Cancel</button>
+				<button id="group-confirm" class="btn primary" type="button">Create group</button>
+			</div>
+		</dialog>
+
+		<!-- Leaderboard -->
+		<dialog id="board" class="sheet" aria-labelledby="board-title">
+			<h2 id="board-title" class="sheet-title">Leaderboard</h2>
+			<ol id="board-list" class="board"></ol>
+			<div class="sheet-actions">
+				<button class="btn quiet" type="button" data-close>Close</button>
+			</div>
+		</dialog>
+
+		<!-- Are you sure? -->
+		<dialog id="confirm" class="sheet small" aria-labelledby="confirm-title">
+			<h2 id="confirm-title" class="sheet-title"></h2>
+			<p id="confirm-text" class="sheet-text"></p>
+			<div class="sheet-actions">
+				<button class="btn quiet" type="button" value="no" data-close>Cancel</button>
+				<button id="confirm-yes" class="btn danger" type="button"></button>
+			</div>
+		</dialog>
+
+		<!-- Calls -->
+		<div id="ringing" class="ringing" role="alertdialog" aria-labelledby="ring-name" hidden>
+			<span id="ring-avatar" class="avatar-slot"></span>
+			<div class="ring-text">
+				<p id="ring-name" class="ring-name"></p>
+				<p id="ring-kind" class="ring-kind"></p>
+			</div>
+			<button id="ring-decline" class="round danger" type="button" aria-label="Decline">
+				<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14.5c4.5-4 11.5-4 16 0l-2 2.5-3.2-1.2v-2.4a9 9 0 0 0-5.6 0v2.4L6 17Z" /></svg>
+			</button>
+			<button id="ring-accept" class="round go" type="button" aria-label="Accept">
+				<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 3.5h2.6l1.4 4.2-2 1.5a11 11 0 0 0 6.2 6.2l1.5-2 4.2 1.4v2.6a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 4.6 5.7a2 2 0 0 1 2-2.2Z" /></svg>
+			</button>
+		</div>
+
+		<section id="call" class="call" aria-label="Call" hidden>
+			<header class="call-head">
+				<div>
+					<p id="call-who" class="call-who"></p>
+					<p id="call-status" class="call-status"></p>
+				</div>
+				<button id="call-wide" class="icon-btn" type="button" aria-label="Make the call bigger" title="Bigger">
+					<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 15v5h-5M4 4l6 6M20 20l-6-6" /></svg>
+				</button>
+				<button id="call-min" class="icon-btn" type="button" aria-label="Back to the chat" title="Back to the chat">
+					<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+				</button>
+			</header>
+			<div id="call-stage" class="call-stage"></div>
+			<div class="call-controls">
+				<button id="call-mute" class="round" type="button" aria-label="Mute" aria-pressed="false">
+					<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3.5" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" /></svg>
+				</button>
+				<button id="call-cam" class="round" type="button" aria-label="Turn camera off" aria-pressed="false">
+					<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6.5" width="12.5" height="11" rx="2.5" /><path d="m15.5 10.5 5.5-3v9l-5.5-3" /></svg>
+				</button>
+				<button id="call-hangup" class="round danger" type="button" aria-label="Hang up">
+					<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14.5c4.5-4 11.5-4 16 0l-2 2.5-3.2-1.2v-2.4a9 9 0 0 0-5.6 0v2.4L6 17Z" /></svg>
+				</button>
+			</div>
+		</section>
+		<button id="call-pill" class="call-pill" type="button" hidden>
+			<span class="live-dot" aria-hidden="true"></span><span id="call-pill-text"></span>
+		</button>
+		<div id="audio-sink" hidden></div>
+
+		<div id="toasts" class="toasts" aria-live="polite"></div>
+	</body>
+</html>

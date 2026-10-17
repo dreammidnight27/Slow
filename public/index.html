@@ -72,7 +72,7 @@
 				<div id="loadbar" aria-hidden="true"></div>
 				<section id="home" class="intro">
 					<nav class="home-apps" aria-label="Apps">
-						<button id="btn-games" class="icon-btn home-app" type="button" aria-label="Games" title="Games" aria-haspopup="true" aria-expanded="false" aria-controls="games-menu">
+						<button id="btn-games" class="icon-btn home-app" type="button" aria-label="Games" aria-haspopup="true" aria-expanded="false" aria-controls="games-menu">
 							<svg viewBox="0 0 24 24" aria-hidden="true">
 							<path d="M7.5 7h9a5 5 0 0 1 4.9 4l.9 4.6a2.7 2.7 0 0 1-4.6 2.4L15.2 16H8.8l-2.5 2a2.7 2.7 0 0 1-4.6-2.4l.9-4.6A5 5 0 0 1 7.5 7Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
 							<path d="M7.5 10v4M5.5 12h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
@@ -80,11 +80,17 @@
 							<circle cx="17.8" cy="13.3" r="1.1" fill="currentColor" />
 							</svg>
 						</button>
-						<button id="btn-movies" class="icon-btn home-app" type="button" aria-label="Movies" title="Movies (Aether)">
+						<button id="btn-movies" class="icon-btn home-app" type="button" aria-label="Movies">
 							<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5" /><path d="M7.5 5v14M16.5 5v14M3 9.7h4.5M3 14.3h4.5M16.5 9.7H21M16.5 14.3H21" /></svg>
 						</button>
-						<button id="btn-music" class="icon-btn home-app" type="button" aria-label="Music" title="Music (Spotify)">
+						<button id="btn-music" class="icon-btn home-app" type="button" aria-label="Music">
 							<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 17.5V6.2l11-2.2v11.3" /><circle cx="6.5" cy="17.5" r="2.5" /><circle cx="17.5" cy="15.3" r="2.5" /></svg>
+						</button>
+						<button id="btn-cloud" class="icon-btn home-app" type="button" aria-label="Cloud gaming">
+							<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18.5h10.6a4 4 0 0 0 .5-7.97A6 6 0 0 0 6.6 9.9 4.3 4.3 0 0 0 7 18.5Z" /><path d="M10.6 11.6v4.2l3.4-2.1Z" /></svg>
+						</button>
+						<button id="btn-chat" class="icon-btn home-app chat-btn" type="button" aria-label="Chat" aria-expanded="false" aria-controls="chat-dock">
+							<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 4.5h13a2.5 2.5 0 0 1 2.5 2.5v8a2.5 2.5 0 0 1-2.5 2.5h-6.3L7.5 21v-3.5h-2A2.5 2.5 0 0 1 3 15V7a2.5 2.5 0 0 1 2.5-2.5Z" /><path d="M8 9.5h8M8 12.8h5" /></svg><span class="chat-badge" aria-hidden="true" hidden></span>
 						</button>
 					</nav>
 
@@ -159,6 +165,12 @@
 			</main>
 		</div>
 
+		<!-- The chat: a panel on the right that stays open while you browse (chat/ is the chat itself) -->
+		<aside id="chat-dock" class="chat-dock" aria-label="Chat" hidden>
+			<div id="chat-grip" class="chat-grip" role="separator" aria-orientation="vertical" aria-label="Chat width" tabindex="0"></div>
+		</aside>
+		<button id="chat-call" class="chat-call" type="button" hidden><span class="live-dot" aria-hidden="true"></span><span id="chat-call-text"></span></button>
+
 		<!-- Command palette: one search box for tabs, history, shortcuts and actions -->
 		<dialog id="palette" class="palette" aria-label="Command palette">
 			<input
@@ -197,6 +209,9 @@
 			<button class="tab-menu-item" type="button" role="menuitem" data-action="close-others" data-icon="&#8863;">Close other tabs</button>
 			<button class="tab-menu-item" type="button" role="menuitem" data-action="close" data-icon="&times;">Close tab</button>
 		</div>
+
+		<!-- Where the link you're pointing at goes -->
+		<div id="link-status" class="link-status" aria-hidden="true"></div>
 
 		<!-- Friendly messages with optional buttons (undo, switch tab, break reminders) -->
 		<div id="notice" class="notice hidden" role="status" aria-live="polite">
@@ -299,32 +314,52 @@
 
 		<dialog id="settings" class="settings" aria-labelledby="settings-title">
 			<form id="settings-form" method="dialog">
-				<header class="settings-head">
+				<aside class="settings-nav">
 					<h2 id="settings-title">Settings</h2>
-					<button class="icon-btn" value="close" aria-label="Close settings">&times;</button>
+					<label class="settings-find">
+						<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg>
+						<input id="settings-find" type="search" placeholder="Find a setting" autocomplete="off" spellcheck="false" aria-label="Find a setting" />
+					</label>
+					<nav id="settings-links" class="settings-links" aria-label="Settings sections"></nav>
+				</aside>
+
+				<div class="settings-main">
+				<header class="settings-head">
+					<h3 id="settings-crumb" class="settings-crumb">Theme</h3>
+					<button class="icon-btn" value="close" aria-label="Close settings"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
 				</header>
 
 				<div class="settings-body">
+					<p id="settings-none" class="settings-none" hidden>No settings match that.</p>
 					<section>
 						<h3>Theme</h3>
-						<div id="theme-grid" class="theme-grid settings-themes"></div>
-						<div class="custom-colors">
-							<span class="setting-text">
-								<span class="setting-name">Custom colors</span>
-								<span class="setting-hint">Pick your own. The rest of the colors (nebula, glow, logo) are made to match.</span>
-							</span>
-							<div class="color-pickers">
-								<label class="color-field">
-									<input id="custom-accent" type="color" />
-									<span>Accent</span>
+						<div id="theme-grid" class="theme-grid settings-themes" role="radiogroup" aria-label="Theme"></div>
+						<div id="custom-editor" class="custom-editor" hidden>
+							<div class="custom-editor-head">
+								<span class="setting-name">Your colors</span>
+								<span class="setting-hint">Pick two colors. Slow matches everything else (glow, stars, logo) to them.</span>
+							</div>
+							<div class="color-row">
+								<span class="color-label">Accent</span>
+								<div id="accent-presets" class="color-presets" role="group" aria-label="Accent colors"></div>
+								<label class="color-pick" title="Any color">
+									<input id="custom-accent" type="color" aria-label="Pick any accent color" />
+									<span id="custom-accent-hex" class="color-hex"></span>
 								</label>
-								<label class="color-field">
-									<input id="custom-bg" type="color" />
-									<span>Background</span>
+							</div>
+							<div class="color-row">
+								<span class="color-label">Background</span>
+								<div id="bg-presets" class="color-presets" role="group" aria-label="Background colors"></div>
+								<label class="color-pick" title="Any color">
+									<input id="custom-bg" type="color" aria-label="Pick any background color" />
+									<span id="custom-bg-hex" class="color-hex"></span>
 								</label>
 							</div>
 						</div>
-						<button id="btn-surprise" class="surprise-btn" type="button">Surprise me</button>
+						<div class="theme-foot">
+							<span class="setting-hint">Changes show right away.</span>
+							<button id="btn-surprise" class="pill-btn surprise-btn" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5c.5 4.2 2.3 6 6.5 6.5-4.2.5-6 2.3-6.5 6.5-.5-4.2-2.3-6-6.5-6.5 4.2-.5 6-2.3 6.5-6.5Z" /><path d="M18.5 15.5c.2 1.6.9 2.3 2.5 2.5-1.6.2-2.3.9-2.5 2.5-.2-1.6-.9-2.3-2.5-2.5 1.6-.2 2.3-.9 2.5-2.5Z" /></svg>Surprise me</button>
+						</div>
 					</section>
 
 					<section>
@@ -386,6 +421,20 @@
 						<label class="setting">
 							<span class="setting-text"><span class="setting-name">Show shortcuts</span></span>
 							<input type="checkbox" role="switch" name="showShortcuts" />
+						</label>
+					</section>
+
+					<section>
+						<h3>Chat</h3>
+						<label class="setting">
+							<span class="setting-text">
+								<span class="setting-name">Open the chat</span>
+								<span class="setting-hint">Full screen like games and movies, or in a panel on the side so you can browse and chat at once. (Alt+C opens it from anywhere.)</span>
+							</span>
+							<select name="chatMode">
+								<option value="full">Full screen</option>
+								<option value="dock">In a side panel</option>
+							</select>
 						</label>
 					</section>
 
@@ -528,25 +577,56 @@
 						</div>
 					</section>
 				</div>
+			</div>
 			</form>
 		</dialog>
 
 		<div id="games-menu" class="games-menu hidden" role="dialog" aria-modal="true" aria-labelledby="games-title">
-			<div class="games-page">
-				<header class="games-top">
-					<h2 id="games-title">Games <span id="games-total" class="games-total"></span></h2>
-					<button id="games-close" class="icon-btn" type="button" aria-label="Close games">&times;</button>
-				</header>
-				<div class="games-head">
-					<div class="games-views" role="tablist" aria-label="Game lists"></div>
-					<div class="games-search">
-						<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg>
-						<input id="games-filter" type="search" placeholder="Find a game" autocomplete="off" spellcheck="false" aria-label="Find a game" />
-						<button id="games-clear" type="button" aria-label="Clear search" hidden>&times;</button>
+			<div class="games-shell">
+				<aside class="games-side">
+					<div class="games-brand">
+						<h2 id="games-title">Games</h2>
+						<span id="games-total" class="games-total"></span>
 					</div>
+					<nav id="games-views" class="games-views" aria-label="Game lists"></nav>
+				</aside>
+				<section class="games-main">
+					<header class="games-bar">
+						<div class="games-search">
+							<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg>
+							<input id="games-filter" type="search" placeholder="Search games" autocomplete="off" spellcheck="false" aria-label="Search games" />
+							<button id="games-clear" type="button" aria-label="Clear search" hidden>&times;</button>
+						</div>
+						<button id="games-random" class="icon-btn" type="button" aria-label="Play a random game" title="Play something random"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4" /><circle class="fill" cx="8.6" cy="8.6" r="1.3" /><circle class="fill" cx="15.4" cy="8.6" r="1.3" /><circle class="fill" cx="12" cy="12" r="1.3" /><circle class="fill" cx="8.6" cy="15.4" r="1.3" /><circle class="fill" cx="15.4" cy="15.4" r="1.3" /></svg></button>
+						<button id="games-close" class="icon-btn" type="button" aria-label="Close games"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
+					</header>
+					<div id="games-body" class="games-body"></div>
+					<p id="games-note" class="games-note"></p>
+				</section>
+			</div>
+		</div>
+
+		<!-- Movies, music, cloud games and games open here, inside Slow -->
+		<div id="app-view" class="app-view hidden" role="dialog" aria-modal="true" aria-labelledby="app-title">
+			<header class="app-bar">
+				<button id="app-back" class="icon-btn" type="button" aria-label="Back" title="Back"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg></button>
+				<span id="app-icon" class="app-icon" aria-hidden="true"></span>
+				<div class="app-names">
+					<h2 id="app-title">App</h2>
+					<span id="app-sub" class="app-sub"></span>
 				</div>
-				<div id="games-grid" class="games-grid"></div>
-				<p id="games-note" class="games-note"></p>
+				<div class="app-actions">
+					<button id="app-reload" class="icon-btn" type="button" aria-label="Reload" title="Reload"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9" /><path d="M20 4.5V9h-4.5" /></svg></button>
+					<button id="app-full" class="icon-btn" type="button" aria-label="Full screen" title="Full screen"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg></button>
+					<button id="app-tab" class="icon-btn" type="button" aria-label="Open in a tab" title="Open in a tab"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-8.5 8.5M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10" /></svg></button>
+					<button id="app-close" class="icon-btn" type="button" aria-label="Close" title="Close"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
+				</div>
+			</header>
+			<div id="app-body" class="app-body">
+				<div id="app-veil" class="app-veil" hidden>
+					<span class="app-spinner" aria-hidden="true"></span>
+					<p id="app-veil-text">Opening…</p>
+				</div>
 			</div>
 		</div>
 

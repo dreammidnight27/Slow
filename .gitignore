@@ -7,3 +7,6 @@ public/.claude/
 # your private key for sharing Slow (npm run share), and the tunnel program
 .slow-key
 tools/
+
+# The links Share Slow is sharing right now (they hold your private key)
+.slow-share.json

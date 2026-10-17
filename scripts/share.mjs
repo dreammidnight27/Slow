@@ -5,7 +5,7 @@
 // Keep the window open while you use them; Ctrl+C stops sharing.
 
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { fileURLToPath } from "node:url";
 
@@ -33,10 +33,14 @@ let tunnel = null;
 function stop(code = 0) {
 	process.exit(code);
 }
+// The links being shared right now, for the share page (only this computer can open it).
+const shareFile = fileURLToPath(new URL("../.slow-share.json", import.meta.url));
+
 // However this ends, the tunnel (and the server, if this started it) end with it.
 process.on("exit", () => {
 	tunnel?.kill();
 	server?.kill();
+	rmSync(shareFile, { force: true });
 });
 process.on("SIGINT", () => stop(0));
 process.on("SIGTERM", () => stop(0));
@@ -110,7 +114,10 @@ setTimeout(() => {
 
 function share(address) {
 	const wisp = `${address.replace(/^https/, "wss")}/${key}/wisp/`;
+	const siteLink = `${SITE}#wisp=${encodeURIComponent(wisp)}`;
 	copyToClipboard(wisp);
+	writeFileSync(shareFile, JSON.stringify({ siteLink, privateLink: `${address}/${key}/`, wisp, since: Date.now() }));
+	openInBrowser(`http://localhost:${port}/share`);
 	console.log(`
   Slow is shared. Websites you open with these links load through this computer.
   Keep this window open while you use them. Ctrl+C stops sharing.
@@ -118,8 +125,11 @@ function share(address) {
   Your private link (works on any device):
       ${address}/${key}/
 
-  Or your usual Slow site, set to load through this computer:
-      ${SITE}#wisp=${encodeURIComponent(wisp)}
+  Or your usual Slow site, set to load through this computer
+  (open it once on a device and that device keeps using this computer):
+      ${siteLink}
+
+  The share page that just opened has a QR code for your phone.
 
   Your wisp server (paste into Settings > Connection on any copy of Slow):
       ${wisp}${copied ? "\n      (already copied to your clipboard)" : ""}
@@ -130,6 +140,21 @@ function share(address) {
   To copy from this window, select the text first. Ctrl+C with nothing
   selected stops sharing.
 `);
+}
+
+// Opens the share page in this computer's usual browser.
+function openInBrowser(url) {
+	const [command, args] =
+		process.platform === "win32"
+			? ["rundll32", ["url.dll,FileProtocolHandler", url]]
+			: process.platform === "darwin"
+				? ["open", [url]]
+				: ["xdg-open", [url]];
+	try {
+		const opener = spawn(command, args, { stdio: "ignore", detached: true });
+		opener.on("error", () => {});
+		opener.unref();
+	} catch {}
 }
 
 // Puts the wisp address on the clipboard (Windows), so there's nothing to copy by hand.

@@ -86,6 +86,8 @@ const AD_HOSTS = new Set([
 	"exoclick.com", "exosrv.com", "juicyads.com", "trafficjunky.net", "hilltopads.net", "a-ads.com",
 	"mgid.com", "revcontent.com", "zedo.com", "adroll.com", "adsafeprotected.com", "doubleverify.com",
 	"serving-sys.com", "flashtalking.com", "ads-twitter.com", "adeventtracker.spotify.com",
+	// Adsterra's pop-up ad network (the cloud gaming page's Synapse games load it)
+	"effectivecpmnetwork.com", "effectiveratecpm.com", "highperformanceformat.com",
 ]);
 
 function isAd(url) {
@@ -120,6 +122,39 @@ scramjet.addEventListener("request", (event) => {
 	}
 });
 
+/* ---------- YouTube videos play in YouTube's embedded player ----------
+   YouTube's full video page crashes the browser tab when it runs through Scramjet (its home page,
+   search and embedded player all work), so videos open in the embedded player instead.
+   youtube.js (added to YouTube's pages below) does the same for videos opened from inside YouTube. */
+
+function youtubeEmbed(url) {
+	if (!/(^|\.)youtube\.com$/.test(url.hostname) || url.pathname !== "/watch") return null;
+	const id = url.searchParams.get("v");
+	if (!id || !/^[\w-]{6,20}$/.test(id)) return null;
+	const embed = new URL(`https://www.youtube.com/embed/${id}`);
+	embed.searchParams.set("autoplay", "1");
+	const start = parseInt(url.searchParams.get("t") || "", 10);
+	if (start > 0) embed.searchParams.set("start", String(start));
+	const list = url.searchParams.get("list");
+	if (list) embed.searchParams.set("list", list);
+	return embed.href;
+}
+
+scramjet.addEventListener("request", (event) => {
+	if (event.method !== "GET" || (event.destination !== "document" && event.destination !== "iframe")) return;
+	// The embedded player refuses to play (error 153) unless it knows what site it's on, which it
+	// reads from the referrer, and a page opened from Slow's new tab page has none. So it's told the
+	// truth: it's on Slow. (Saying it's on YouTube itself gets "video unavailable", error 152.)
+	if (/(^|\.)youtube\.com$/.test(event.url.hostname) && event.url.pathname.startsWith("/embed/")) {
+		event.requestHeaders["referer"] ||= new URL("./", self.location.href).href;
+	}
+	const embed = youtubeEmbed(event.url);
+	if (!embed) return;
+	const moved = new Response(null, { status: 302, headers: { location: embed } });
+	moved.rawHeaders = { location: embed };
+	event.response = Promise.resolve(moved);
+});
+
 const FLAGS_CACHE = "slow-flags";
 let blockAds = true;
 const flagsLoaded = caches
@@ -142,13 +177,84 @@ scramjet.addEventListener("request", (event) => {
 	event.response = Promise.resolve(empty);
 });
 
+/* ---------- keeping websites' files between visits ----------
+   Files that come through the proxy never reach the browser's own cache, so every visit
+   downloaded (and adapted) every script, stylesheet, picture and font again. Slow keeps them
+   itself, adapted and ready, for as long as the website says they stay the same (Cache-Control),
+   up to a week. Pages themselves and data (logins, feeds, searches) are never kept. */
+
+const PROXY_CACHE = "slow-proxy-v1"; // a new name drops everything kept by an older Slow
+const KEEP_KINDS = new Set(["script", "style", "image", "font"]);
+const KEEP_MAX_BYTES = 5 * 1024 * 1024;
+const KEEP_MAX_FILES = 3000;
+const KEEP_MAX_SECONDS = 7 * 24 * 3600;
+
+const keepable = (request) =>
+	request.method === "GET" && KEEP_KINDS.has(request.destination) && !request.headers.has("range");
+
+// How long the website allows keeping a file, in seconds (0: don't keep it).
+function keepFor(response) {
+	if (response.status !== 200) return 0;
+	const control = (response.headers.get("cache-control") || "").toLowerCase();
+	if (/no-store|no-cache|private/.test(control)) return 0;
+	if ((response.headers.get("vary") || "").includes("*")) return 0;
+	const age = Number(control.match(/(?:^|,)\s*max-age=(\d+)/)?.[1] || 0);
+	return age >= 60 ? Math.min(age, KEEP_MAX_SECONDS) : 0;
+}
+
+async function fromProxyCache(request) {
+	try {
+		const cache = await caches.open(PROXY_CACHE);
+		const kept = await cache.match(request.url);
+		if (!kept) return null;
+		if (Number(kept.headers.get("x-slow-until")) > Date.now()) return kept;
+		cache.delete(request.url);
+	} catch {}
+	return null;
+}
+
+let keptSinceTidy = 0;
+
+async function keepInProxyCache(request, response) {
+	const seconds = keepFor(response);
+	const size = Number(response.headers.get("content-length") || 0);
+	if (!seconds || size > KEEP_MAX_BYTES) return;
+	try {
+		const body = await response.blob();
+		if (body.size > KEEP_MAX_BYTES) return;
+		const headers = new Headers(response.headers);
+		headers.set("x-slow-until", String(Date.now() + seconds * 1000));
+		const cache = await caches.open(PROXY_CACHE);
+		await cache.put(request.url, new Response(body, { status: 200, statusText: response.statusText, headers }));
+		if (++keptSinceTidy >= 200) {
+			keptSinceTidy = 0;
+			tidyProxyCache(cache);
+		}
+	} catch {}
+}
+
+// Keeps the cache to a sensible size: the oldest files go first.
+async function tidyProxyCache(cache) {
+	try {
+		const keys = await cache.keys();
+		const extra = keys.length - KEEP_MAX_FILES;
+		for (const key of keys.slice(0, Math.max(0, extra) + (extra > 0 ? 400 : 0))) await cache.delete(key);
+	} catch {}
+}
+
 async function handleRequest(event) {
 	await scramjet.loadConfig();
 	await cookiesLoaded;
 	await flagsLoaded;
 	if (scramjet.route(event)) {
 		if (event.request.method === "HEAD") return headRequest(event);
+		const keep = keepable(event.request);
+		if (keep) {
+			const kept = await fromProxyCache(event.request);
+			if (kept) return kept;
+		}
 		const response = await scramjet.fetch(event);
+		if (keep && keepFor(response)) event.waitUntil(keepInProxyCache(event.request, response.clone()));
 		// Scramjet's "couldn't load" page skips the hook below that adds isolation headers, so the
 		// browser blocked it: a blank tab, which Slow also couldn't read to reconnect and retry.
 		return ["document", "iframe"].includes(event.request.destination) ? isolated(response) : response;
@@ -167,6 +273,7 @@ const COVER_HOSTS = [
 	"https://raw.githubusercontent.com/gn-math/covers/",
 	"https://selenite.cc/resources/semag/",
 	"https://3kh0.github.io/projects/",
+	"https://cdn.jsdelivr.net/gh/carbonicality/ChickenKingsVault@main/gameimages/",
 ];
 
 function isCover(request) {
@@ -238,11 +345,22 @@ const TAB_VOLUME_SCRIPT = `<script src="${new URL("tab-volume.js", self.location
 const ADBLOCK_SCRIPT = `<script src="${new URL("adblock.js", self.location.href).href}"></script>`;
 // ...and English for page scripts (see "websites in English" above).
 const ENGLISH_SCRIPT = `<script src="${new URL("english.js", self.location.href).href}"></script>`;
+// ...and new-tab links, link previews and Slow's shortcuts inside websites (browsing.js)...
+const BROWSING_SCRIPT = `<script src="${new URL("browsing.js", self.location.href).href}"></script>`;
+// ...and, on the cloud gaming page only, Slow's look for it (cloud-skin.js)...
+const CLOUD_SKIN_SCRIPT = `<script src="${new URL("cloud-skin.js", self.location.href).href}"></script>`;
+const isCloudPage = (url) =>
+	/^(churchofmoses\.b-cdn\.net|t9os\.space)$/.test(url.hostname) && url.pathname.endsWith("/launcher.html");
+// ...and, on YouTube only, the script that opens its videos in the embedded player (see above).
+const YOUTUBE_SCRIPT = `<script src="${new URL("youtube.js", self.location.href).href}"></script>`;
 
 // UGS games are single web pages kept on jsDelivr, which sends them labelled as plain text,
 // so they'd show as code. Scramjet only adapts pages labelled as web pages (before any later
 // hook could relabel them), so Slow fetches these itself and labels them as web pages first.
 const UGS_FILES = "https://cdn.jsdelivr.net/gh/bubbls/ugs-singlefile/UGS-Files/";
+// Chicken King's Vault's games are kept on jsDelivr the same way.
+const CKV_FILES = "https://cdn.jsdelivr.net/gh/carbonicality/ChickenKingsVault@main/gamefiles/";
+const PLAIN_TEXT_GAMES = [UGS_FILES, CKV_FILES];
 
 // Many UGS Flash games tell the Flash player to load "$1" (a leftover placeholder) instead of the
 // game, and rely on a backup <embed> of the game, which doesn't survive Scramjet. So the player
@@ -257,8 +375,14 @@ function fixUgsFlash(html) {
 		.replace(/<embed[^>]*\.swf"[^>]*>/i, "");
 }
 
+// Some of these games are still wrapped as old "Google Gadgets": the real page sits inside
+// <Content type="html"><![CDATA[ ... ]]>, which browsers read as a comment (a blank page).
+function unwrapGadget(html) {
+	return html.match(/<Content[^>]*type=["']html["'][^>]*>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/Content>/i)?.[1] ?? html;
+}
+
 scramjet.addEventListener("request", (event) => {
-	if (!event.url.href.startsWith(UGS_FILES)) return;
+	if (!PLAIN_TEXT_GAMES.some((files) => event.url.href.startsWith(files))) return;
 	if (event.destination !== "document" && event.destination !== "iframe") return;
 	event.response = (async () => {
 		const res = await scramjet.client.fetch(event.url, {
@@ -278,7 +402,7 @@ scramjet.addEventListener("request", (event) => {
 		for (const [name, value] of Object.entries(rawHeaders)) {
 			if (typeof value === "string") headers.set(name, value);
 		}
-		const page = new Response(fixUgsFlash(await res.text()), { status: res.status, statusText: res.statusText, headers });
+		const page = new Response(fixUgsFlash(unwrapGadget(await res.text())), { status: res.status, statusText: res.statusText, headers });
 		page.rawHeaders = rawHeaders;
 		return page;
 	})();
@@ -306,7 +430,9 @@ scramjet.addEventListener("handleResponse", (event) => {
 	const injected = html.match(SCRAMJET_SCRIPTS);
 	if (!injected) return;
 
-	const ours = injected[0] + TAB_VOLUME_SCRIPT + ADBLOCK_SCRIPT + ENGLISH_SCRIPT;
+	const youtube = /(^|\.)youtube\.com$/.test(event.url.hostname) ? YOUTUBE_SCRIPT : "";
+	const skin = isCloudPage(event.url) ? CLOUD_SKIN_SCRIPT : "";
+	const ours = injected[0] + TAB_VOLUME_SCRIPT + ADBLOCK_SCRIPT + ENGLISH_SCRIPT + BROWSING_SCRIPT + youtube + skin;
 	const firstScript = html.search(/<script[\s>]/i);
 
 	if (firstScript === -1 || firstScript >= injected.index) {
@@ -324,12 +450,46 @@ scramjet.addEventListener("handleResponse", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-	event.respondWith(handleRequest(event));
+	// Other websites' files that Slow's own pages ask for (fonts, the chat's server, GitHub for
+	// dev mode...) go straight to them. Websites shown inside Slow are all on Slow's own address.
+	if (!event.request.url.startsWith(self.location.origin) && !isCover(event.request)) return;
+	event.respondWith(answerInTime(handleRequest(event)));
 });
+
+// A request that never gets an answer keeps this worker busy, and a new version of Slow can't
+// take over until it's free (an update could wait for good). So no request waits more than
+// 90 seconds for its answer to start. (Downloads and streams that have started aren't cut off.)
+function answerInTime(answer) {
+	let timer;
+	const late = new Promise((resolve) => {
+		const tooLate = () =>
+			new Response("Slow waited 90 seconds and the website never answered. Try loading it again.", {
+				status: 504,
+				statusText: "Gateway Timeout",
+				headers: {
+					"Content-Type": "text/plain; charset=utf-8",
+					"Cross-Origin-Embedder-Policy": "require-corp",
+					"Cross-Origin-Opener-Policy": "same-origin",
+				},
+			});
+		timer = setTimeout(() => resolve(tooLate()), 90_000);
+	});
+	return Promise.race([answer, late]).finally(() => clearTimeout(timer));
+}
 
 // A new version of this worker takes over right away instead of waiting for every tab to close.
 self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+self.addEventListener("activate", (event) =>
+	event.waitUntil(
+		Promise.all([
+			self.clients.claim(),
+			// Files kept by an older version of Slow's proxy may not suit this one.
+			caches
+				.keys()
+				.then((names) => Promise.all(names.filter((n) => n.startsWith("slow-proxy-") && n !== PROXY_CACHE).map((n) => caches.delete(n)))),
+		]),
+	),
+);
 
 // The page saves Scramjet's settings each time it loads; this makes the worker read them again
 // (it otherwise keeps the first settings it loaded until the browser restarts it).
