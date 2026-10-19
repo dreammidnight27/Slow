@@ -5,12 +5,16 @@
    ============================================================ */
 
 // Where typed searches can go. %s is replaced by what you typed.
+// Bing is first (and the default): it serves a full results page through the proxy without a fuss.
+// Google blocks the proxy's shared address with an "unusual traffic" CAPTCHA wall, so searches
+// sent there just fail for most people — it's kept as a choice, but it isn't the default anymore.
 const SEARCH_ENGINES = {
-	// "udm=14" is Google's plain "Web" results. Its full results page has scripts (like the
-	// AI Overview's) that the proxy can't adapt yet, which leaves gaps and overlapping text.
-	google: { name: "Google", url: "https://www.google.com/search?q=%s&udm=14" },
-	duckduckgo: { name: "DuckDuckGo", url: "https://duckduckgo.com/?q=%s" },
 	bing: { name: "Bing", url: "https://www.bing.com/search?q=%s" },
+	// "udm=14" is Google's plain "Web" results. Google often answers the proxy with a CAPTCHA
+	// ("unusual traffic from your network"), and its full results page also has scripts (like the
+	// AI Overview's) that the proxy can't adapt yet, which leaves gaps and overlapping text.
+	google: { name: "Google (may ask for a CAPTCHA)", url: "https://www.google.com/search?q=%s&udm=14" },
+	duckduckgo: { name: "DuckDuckGo", url: "https://duckduckgo.com/?q=%s" },
 	brave: { name: "Brave Search", url: "https://search.brave.com/search?q=%s" },
 	startpage: { name: "Startpage", url: "https://www.startpage.com/do/search?q=%s" },
 };
@@ -24,7 +28,7 @@ const MAX_TABS = 8;
 const SETTINGS_KEY = "slow.settings";
 
 const DEFAULT_SETTINGS = {
-	searchEngine: "google",
+	searchEngine: "bing",
 	showShortcuts: true,
 	history: true,
 	suggestions: true,
@@ -64,6 +68,14 @@ const settings = (() => {
 		// Older versions had an on/off "sounds" switch; keep it off for people who turned it off.
 		if (saved.sounds === false && saved.hoverSound === undefined) saved.hoverSound = "off";
 		delete saved.sounds;
+		// Google used to be the default, but it now blocks the proxy's shared address with a
+		// CAPTCHA wall, so those searches fail. Move anyone still on that old default over to Bing
+		// (which works) one time. If they deliberately pick Google again afterward, the marker
+		// keeps this from undoing their choice on the next visit.
+		if (!saved.searchMovedOffGoogle) {
+			if (saved.searchEngine === "google") saved.searchEngine = "bing";
+			saved.searchMovedOffGoogle = true;
+		}
 		return { ...DEFAULT_SETTINGS, ...saved };
 	} catch {
 		return { ...DEFAULT_SETTINGS };
@@ -79,7 +91,7 @@ function saveSettings() {
 }
 
 function searchTemplate() {
-	return (SEARCH_ENGINES[settings.searchEngine] || SEARCH_ENGINES.google).url;
+	return (SEARCH_ENGINES[settings.searchEngine] || SEARCH_ENGINES.bing).url;
 }
 
 function calm() {
@@ -1337,7 +1349,7 @@ const SUGGEST_FEEDS = {
 const suggestCache = new Map();
 
 async function webSuggestions(query) {
-	const feed = SUGGEST_FEEDS[settings.searchEngine] || SUGGEST_FEEDS.google;
+	const feed = SUGGEST_FEEDS[settings.searchEngine] || SUGGEST_FEEDS.bing;
 	const key = feed + query.toLowerCase();
 	if (suggestCache.has(key)) return suggestCache.get(key);
 	await ensureReady();
@@ -1409,7 +1421,7 @@ function attachSuggest(input, box, { showRecentWhenEmpty }) {
 		if (query) {
 			const target = search(query, searchTemplate());
 			const isSearch = target === searchTemplate().replace("%s", encodeURIComponent(query));
-			const engine = (SEARCH_ENGINES[settings.searchEngine] || SEARCH_ENGINES.google).name;
+			const engine = (SEARCH_ENGINES[settings.searchEngine] || SEARCH_ENGINES.bing).name;
 			list.push(
 				isSearch
 					? { icon: "search", text: query, detail: `${engine} search`, fill: query, run: () => go(query), completion: true }
@@ -3663,7 +3675,7 @@ function buildPaletteItems(query) {
 	// Typed something: offer to go there or search for it, plus everything that matches.
 	const target = search(q, searchTemplate());
 	const isSearch = target === searchTemplate().replace("%s", encodeURIComponent(q));
-	const engine = (SEARCH_ENGINES[settings.searchEngine] || SEARCH_ENGINES.google).name;
+	const engine = (SEARCH_ENGINES[settings.searchEngine] || SEARCH_ENGINES.bing).name;
 	const go = {
 		kind: "go",
 		label: isSearch ? `Search ${engine} for “${q}”` : `Go to ${hostOf(target)}`,
