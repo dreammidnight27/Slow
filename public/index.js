@@ -256,7 +256,8 @@ const scramjetInit = Promise.resolve(scramjet.init());
 // A full address (not "/baremux/worker.js"): pages that set a <base> address would otherwise
 // resolve the short path against another site and lose their connection.
 const connection = new BareMux.BareMuxConnection(new URL(BASE + "baremux/worker.js", location.origin).href);
-const TRANSPORT = BASE + "libcurl/index.mjs";
+// (libcurl, with WebSockets that keep long messages whole: see transport.mjs)
+const TRANSPORT = BASE + "transport.mjs";
 let transportUrl = TRANSPORT; // changes when Slow reconnects with a fresh copy (see reconnect())
 
 // Registers the service worker and connects to the wisp server.
@@ -285,9 +286,13 @@ function ensureReady() {
 				if (settings.wispUrl && settings.wispUrl !== fallback && !(await connectionWorks())) {
 					await connection.setTransport(transportUrl, [{ websocket: fallback }]);
 					connectedWisp = fallback;
-					notify(
-						"Your own server isn't answering (is your computer on, with Share Slow running?), so Slow is using the public server for now.",
-						[
+					notify({
+						tone: "warning",
+						icon: "server",
+						key: "wisp",
+						title: "Your server isn't answering",
+						message: "Slow is using the public server for now. Is your computer on, with Share Slow running?",
+						actions: [
 							{
 								label: "Try mine again",
 								run: () => {
@@ -297,8 +302,8 @@ function ensureReady() {
 								},
 							},
 						],
-						12000,
-					);
+						timeout: 12000,
+					});
 				}
 			}
 		})().catch((err) => {
@@ -420,10 +425,7 @@ const homeForm = document.getElementById("home-form");
 const homeSearch = document.getElementById("home-search");
 const home = document.getElementById("home");
 const viewport = document.getElementById("viewport");
-const toast = document.getElementById("toast");
 const loadbar = document.getElementById("loadbar");
-const error = document.getElementById("sj-error");
-const errorCode = document.getElementById("sj-error-code");
 
 /* ============================================================
    TABS
@@ -510,7 +512,7 @@ function closeTab(id) {
 	if (closedUrl) {
 		closedTabs.push({ url: closedUrl, index });
 		if (closedTabs.length > 20) closedTabs.shift();
-		notify(`Closed ${hostOf(closedUrl)}`, [{ label: "Undo", run: reopenClosedTab }], 6000);
+		notify({ icon: "tab", key: "closed-tab", message: `Closed ${hostOf(closedUrl)}`, actions: [{ label: "Undo", run: reopenClosedTab }], timeout: 6000 });
 	}
 
 	// Fade the closed page out (if you were looking at it) and shrink its tab.
@@ -814,7 +816,7 @@ async function navigate(tab, input, options = {}) {
 	const twin = settings.dedupeTabs && !options.here && findTabWithUrl(url, tab);
 	if (twin) {
 		activate(twin.id);
-		notify(`${hostOf(url)} was already open, so you are back on that tab.`, [
+		notify(`${hostOf(url)} was already open, so you're back on that tab.`, [
 			{ label: "Open here anyway", run: () => { activate(tab.id); navigate(tab, url, { here: true }); } },
 		]);
 		return;
@@ -974,25 +976,16 @@ function updateNavButtons() {
    ERRORS
    ============================================================ */
 
-let toastTimer = null;
+// Something went wrong: a red notification, with the technical details (if any) underneath.
+let errorNotice = null;
 function showError(message, code = "") {
-	error.textContent = message;
-	errorCode.textContent = code;
-	toast.classList.remove("hidden", "leaving");
-	clearTimeout(toastTimer);
-	toastTimer = setTimeout(hideError, 9000);
+	errorNotice = notify({ tone: "error", key: "error", message, detail: code, timeout: 9000 });
 }
 
 function hideError() {
-	if (toast.classList.contains("hidden") || toast.classList.contains("leaving")) return;
-	toast.classList.add("leaving");
-	setTimeout(() => {
-		toast.classList.add("hidden");
-		toast.classList.remove("leaving");
-	}, 200);
+	errorNotice?.close();
+	errorNotice = null;
 }
-
-toast.addEventListener("click", hideError);
 
 /* ============================================================
    EVENTS
@@ -1275,7 +1268,7 @@ const shortcutNote = document.getElementById("shortcut-note");
 
 function addShortcut() {
 	if (shortcuts.length >= SHORTCUT_SLOTS) {
-		notify(`You can have up to ${SHORTCUT_SLOTS} shortcuts. Remove one to add another.`);
+		notify({ tone: "warning", icon: "star", message: `You can have up to ${SHORTCUT_SLOTS} shortcuts. Remove one to add another.` });
 		return;
 	}
 	shortcutForm.reset();
@@ -2504,42 +2497,340 @@ window.addEventListener("beforeunload", (event) => {
 applySettings();
 
 /* ============================================================
-   NOTICES
-   Small friendly messages at the bottom, with optional buttons.
+   NOTIFICATIONS
+   Cards that stack in the bottom right corner (newest nearest the corner), with an icon,
+   an optional title and buttons. Pointing at them pauses their countdown; the × or a swipe
+   to the right puts one away.
+
+     notify("Text")
+     notify("Text", [{ label, run }], timeout)
+     notify({ title, message, actions, timeout, tone, icon, avatar, key, count, onClick })
+
+   tone: "info" (default), "success", "warning", "error", "update" or "chat" (sets the color
+   and the icon). icon: one of NOTICE_ICONS, or an element. avatar: { src, text, color } for a
+   person's picture. key: a new one with the same key takes the old one's place (count: true
+   adds up how many there were, like "3 new"). timeout 0 keeps it until it's answered.
    ============================================================ */
 
-const notice = document.getElementById("notice");
-const noticeText = document.getElementById("notice-text");
-const noticeActions = document.getElementById("notice-actions");
-let noticeTimer = null;
+const noticesEl = document.getElementById("notices");
+const NOTICE_MAX = 4;
+const noticeList = []; // oldest first
+let noticesPaused = false;
 
-// actions: [{ label, run }]. timeout 0 keeps it up until a button is pressed.
+// (Slow's own fixed drawings, on the same 24px grid as the toolbar's icons)
+const NOTICE_ICONS = {
+	info: '<circle cx="12" cy="12" r="8.5" /><path d="M12 11v5.5" /><circle class="fill" cx="12" cy="7.8" r="1.1" />',
+	success: '<circle cx="12" cy="12" r="8.5" /><path d="m8.2 12.3 2.6 2.6 5-5.4" />',
+	warning: '<path d="M12 4.2 2.9 19.5h18.2Z" /><path d="M12 10v4.4" /><circle class="fill" cx="12" cy="16.9" r="1.05" />',
+	error: '<circle cx="12" cy="12" r="8.5" /><path d="m9 9 6 6M15 9l-6 6" />',
+	update: '<path d="M20 12a8 8 0 1 1-2.6-5.9" /><path d="M20 4.5V9h-4.5" />',
+	chat: '<path d="M5.5 4.5h13a2.5 2.5 0 0 1 2.5 2.5v8a2.5 2.5 0 0 1-2.5 2.5h-6.3L7.5 21v-3.5h-2A2.5 2.5 0 0 1 3 15V7a2.5 2.5 0 0 1 2.5-2.5Z" />',
+	tab: '<rect x="3.5" y="6" width="17" height="13" rx="2.5" /><path d="M3.5 10h17M8.5 6v4" />',
+	bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15Z" /><path d="M10 20.5a2 2 0 0 0 4 0" />',
+	lock: '<rect x="5" y="10.5" width="14" height="9.5" rx="2.5" /><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" />',
+	break: '<path d="M5 9.5h11v4.5a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5Z" /><path d="M16 11h1.5a2.5 2.5 0 0 1 0 5H16M8.5 3.5c-.8 1 .8 2 0 3M12 3.5c-.8 1 .8 2 0 3" />',
+	moon: '<path d="M19 14.5A7.5 7.5 0 0 1 9.5 5a7.5 7.5 0 1 0 9.5 9.5Z" />',
+	server: '<rect x="4" y="4.5" width="16" height="6" rx="2" /><rect x="4" y="13.5" width="16" height="6" rx="2" /><circle class="fill" cx="8" cy="7.5" r="1" /><circle class="fill" cx="8" cy="16.5" r="1" />',
+	star: '<path d="m12 4 2.4 5 5.4.7-4 3.7 1 5.4L12 16.2l-4.8 2.6 1-5.4-4-3.7 5.4-.7Z" />',
+	history: '<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" /><path d="M4.5 4.5v3.7h3.7M12 8v4.5l3 1.8" />',
+};
+const NOTICE_TONES = ["info", "success", "warning", "error", "update", "chat"];
+
+function noticeArt(o, tone) {
+	const art = document.createElement("span");
+	art.className = "notice-art";
+	art.setAttribute("aria-hidden", "true");
+	if (o.avatar) {
+		art.classList.add("person");
+		const color = /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(o.avatar.color) ? o.avatar.color : "";
+		if (color) art.style.setProperty("--tint", color);
+		// (pictures come from the chat, already made safe: a data: or blob: address)
+		if (typeof o.avatar.src === "string" && /^(data:image\/|blob:)/.test(o.avatar.src)) {
+			const img = document.createElement("img");
+			img.alt = "";
+			img.src = o.avatar.src;
+			img.addEventListener("error", () => img.replaceWith(String(o.avatar.text || "")));
+			art.append(img);
+		} else {
+			art.textContent = String(o.avatar.text || "").slice(0, 2);
+		}
+	} else if (o.icon instanceof Element) {
+		art.append(o.icon);
+	} else {
+		const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+		svg.setAttribute("viewBox", "0 0 24 24");
+		svg.setAttribute("class", "ico");
+		svg.innerHTML = NOTICE_ICONS[o.icon] || NOTICE_ICONS[tone] || NOTICE_ICONS.info;
+		art.append(svg);
+	}
+	return art;
+}
+
 function notify(message, actions = [], timeout = 7000) {
-	noticeText.textContent = message;
-	noticeActions.textContent = "";
-	for (const action of actions) {
-		const btn = document.createElement("button");
-		btn.type = "button";
-		btn.className = "notice-btn";
-		btn.textContent = action.label;
-		btn.addEventListener("click", () => {
-			hideNotice();
-			action.run?.();
-		});
-		noticeActions.append(btn);
+	const o =
+		message && typeof message === "object"
+			? { actions: [], timeout: 7000, ...message }
+			: { message, actions, timeout };
+	const tone = NOTICE_TONES.includes(o.tone) ? o.tone : "info";
+	const old = o.key ? noticeList.find((n) => n.key === o.key) : null;
+	// (someone's writing a reply in the old one: it just takes in the news, so their words stay)
+	if (old?.el.classList.contains("replying")) {
+		if (o.count) old.count++;
+		const text = old.el.querySelector(".notice-text");
+		if (text && o.message) text.textContent = o.message;
+		const title = old.el.querySelector(".notice-title");
+		if (title && old.count > 1) {
+			let chip = title.querySelector(".notice-count");
+			if (!chip) title.append((chip = Object.assign(document.createElement("span"), { className: "notice-count" })));
+			chip.textContent = `${old.count} new`;
+		}
+		return { close: () => dismissNotice(old) };
+	}
+	const n = { key: o.key || null, count: old && o.count ? old.count + 1 : 1, timeout: Math.max(0, Number(o.timeout) || 0) };
+
+	const el = document.createElement("div");
+	el.className = `notice tone-${tone}${o.onClick ? " clickable" : ""}`;
+	el.setAttribute("role", tone === "error" || tone === "warning" ? "alert" : "status");
+	n.el = el;
+
+	const body = document.createElement("div");
+	body.className = "notice-body";
+	if (o.title) {
+		const title = document.createElement("p");
+		title.className = "notice-title";
+		const text = document.createElement("span");
+		text.textContent = o.title;
+		title.append(text);
+		if (n.count > 1) {
+			const chip = document.createElement("span");
+			chip.className = "notice-count";
+			chip.textContent = `${n.count} new`;
+			title.append(chip);
+		}
+		body.append(title);
+	}
+	if (o.message) {
+		const text = document.createElement("p");
+		text.className = "notice-text";
+		text.textContent = o.message;
+		body.append(text);
+	}
+	if (o.detail) {
+		const detail = document.createElement("pre");
+		detail.className = "notice-detail";
+		detail.textContent = String(o.detail).slice(0, 400);
+		body.append(detail);
+	}
+	const reply = o.reply && typeof o.reply.send === "function" ? noticeReply(n, o.reply) : null;
+	if (o.actions?.length || reply) {
+		const row = document.createElement("div");
+		row.className = "notice-actions";
+		if (reply) row.append(reply.button);
+		for (const action of o.actions || []) {
+			const btn = document.createElement("button");
+			btn.type = "button";
+			btn.className = "notice-btn";
+			btn.textContent = action.label;
+			btn.addEventListener("click", (event) => {
+				event.stopPropagation();
+				dismissNotice(n);
+				action.run?.();
+			});
+			row.append(btn);
+		}
+		body.append(row);
+		if (reply) body.append(reply.form);
 	}
 
-	notice.classList.remove("hidden", "leaving");
-	playEnter(notice);
-	clearTimeout(noticeTimer);
-	// A thin bar along the bottom counts down until it closes by itself.
-	notice.classList.remove("timed");
-	if (timeout) {
-		notice.style.setProperty("--life", `${timeout}ms`);
-		void notice.offsetWidth;
-		notice.classList.add("timed");
-		noticeTimer = setTimeout(hideNotice, timeout);
+	const close = document.createElement("button");
+	close.type = "button";
+	close.className = "notice-x";
+	close.setAttribute("aria-label", "Dismiss");
+	close.innerHTML = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>';
+	close.addEventListener("click", (event) => {
+		event.stopPropagation();
+		dismissNotice(n);
+	});
+
+	el.append(noticeArt(o, tone), body, close);
+	if (o.onClick) {
+		el.addEventListener("click", () => {
+			if (n.swiped) return;
+			dismissNotice(n);
+			o.onClick();
+		});
 	}
+	swipeAway(n);
+
+	// A thin bar along the bottom counts down until it goes by itself.
+	if (n.timeout) {
+		el.classList.add("timed");
+		el.style.setProperty("--life", `${n.timeout}ms`);
+		n.left = n.timeout;
+	}
+
+	if (old) {
+		// (in its place, without the coming and going)
+		dismissNotice(old, { instant: true });
+		el.classList.add("again");
+	}
+	noticeList.push(n);
+	noticesEl.append(el);
+	if (!noticesPaused) armNotice(n);
+
+	// Only a few at once: the oldest ones that would go by themselves go first.
+	while (noticeList.length > NOTICE_MAX) dismissNotice(noticeList.find((x) => x.timeout) || noticeList[0]);
+	return { close: () => dismissNotice(n) };
+}
+
+// "Reply" on a chat notification: a box opens right in it, and Enter sends (the chat stays closed).
+// reply: { placeholder, send(text) }, where send gives back a promise.
+function noticeReply(n, { placeholder, send }) {
+	const button = document.createElement("button");
+	button.type = "button";
+	button.className = "notice-btn";
+	button.textContent = "Reply";
+
+	const form = document.createElement("form");
+	form.className = "notice-reply";
+	form.hidden = true;
+	const input = document.createElement("input");
+	input.type = "text";
+	input.maxLength = 500;
+	input.autocomplete = "off";
+	input.placeholder = String(placeholder || "Reply");
+	input.setAttribute("aria-label", input.placeholder);
+	const go = document.createElement("button");
+	go.type = "submit";
+	go.className = "notice-send";
+	go.setAttribute("aria-label", "Send");
+	go.innerHTML = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M12 6l6 6-6 6" /></svg>';
+	form.append(input, go);
+
+	// (typing in it isn't a click on the notification)
+	form.addEventListener("click", (event) => event.stopPropagation());
+	button.addEventListener("click", (event) => {
+		event.stopPropagation();
+		button.hidden = true;
+		form.hidden = false;
+		n.el.classList.add("replying");
+		// While you write, it stays.
+		clearTimeout(n.timer);
+		n.timeout = 0;
+		n.el.classList.remove("timed");
+		input.focus();
+	});
+	form.addEventListener("submit", async (event) => {
+		event.preventDefault();
+		const text = input.value.trim();
+		if (!text || form.classList.contains("sending")) return;
+		form.classList.add("sending");
+		input.disabled = go.disabled = true;
+		try {
+			await send(text);
+			form.replaceChildren(Object.assign(document.createElement("span"), { className: "notice-sent", textContent: "Sent" }));
+			setTimeout(() => dismissNotice(n), 900);
+		} catch {
+			form.classList.remove("sending");
+			input.disabled = go.disabled = false;
+			input.placeholder = "Didn't send. Try again?";
+			input.focus();
+		}
+	});
+	return { button, form };
+}
+
+function armNotice(n) {
+	if (!n.timeout || n.gone) return;
+	clearTimeout(n.timer);
+	n.ends = Date.now() + n.left;
+	n.timer = setTimeout(() => dismissNotice(n), n.left);
+}
+
+function dismissNotice(n, { instant = false } = {}) {
+	if (!n || n.gone) return;
+	n.gone = true;
+	clearTimeout(n.timer);
+	noticeList.splice(noticeList.indexOf(n), 1);
+	if (instant) {
+		n.el.remove();
+		return;
+	}
+	n.el.style.height = `${n.el.offsetHeight}px`;
+	n.el.classList.add("leaving");
+	setTimeout(() => n.el.remove(), 260);
+}
+
+// Put away every notification whose key starts with this (the chat's, once you open it).
+function dismissNotices(prefix) {
+	for (const n of [...noticeList]) if (n.key?.startsWith(prefix)) dismissNotice(n);
+}
+
+// Pointing at them (or moving into them with the keyboard) stops the clock, for all of them.
+function pauseNotices(paused) {
+	if (paused === noticesPaused) return;
+	noticesPaused = paused;
+	noticesEl.classList.toggle("paused", paused);
+	for (const n of noticeList) {
+		if (!n.timeout) continue;
+		if (paused) {
+			clearTimeout(n.timer);
+			n.left = Math.max(1000, n.ends - Date.now());
+		} else {
+			armNotice(n);
+		}
+	}
+}
+noticesEl.addEventListener("pointerenter", () => pauseNotices(true));
+noticesEl.addEventListener("pointerleave", () => pauseNotices(noticesEl.contains(document.activeElement)));
+noticesEl.addEventListener("focusin", () => pauseNotices(true));
+noticesEl.addEventListener("focusout", (event) => {
+	if (!noticesEl.contains(event.relatedTarget) && !noticesEl.matches(":hover")) pauseNotices(false);
+});
+noticesEl.addEventListener("keydown", (event) => {
+	if (event.key !== "Escape") return;
+	const n = noticeList.find((x) => x.el.contains(event.target));
+	if (n) {
+		event.stopPropagation();
+		dismissNotice(n);
+	}
+});
+
+// Swipe one to the right (with a finger or the mouse) to put it away.
+function swipeAway(n) {
+	const el = n.el;
+	el.addEventListener("pointerdown", (event) => {
+		if (event.button !== 0 || event.target.closest("button, input, form")) return;
+		const startX = event.clientX;
+		let dx = 0;
+		const move = (e) => {
+			dx = Math.max(0, e.clientX - startX);
+			if (dx > 6 && !el.classList.contains("swiping")) {
+				el.classList.add("swiping");
+				el.setPointerCapture?.(event.pointerId);
+			}
+			if (!el.classList.contains("swiping")) return;
+			el.style.transform = `translateX(${dx}px)`;
+			el.style.opacity = String(Math.max(0.2, 1 - dx / 260));
+		};
+		const up = () => {
+			el.removeEventListener("pointermove", move);
+			if (!el.classList.contains("swiping")) return;
+			el.classList.remove("swiping");
+			n.swiped = true;
+			setTimeout(() => (n.swiped = false), 0); // (so the click that ends a swipe doesn't count)
+			if (dx > 90) {
+				el.classList.add("swiped");
+				dismissNotice(n);
+			} else {
+				el.style.transform = "";
+				el.style.opacity = "";
+			}
+		};
+		el.addEventListener("pointermove", move);
+		el.addEventListener("pointerup", up, { once: true });
+		el.addEventListener("pointercancel", up, { once: true });
+	});
 }
 
 // When a new version of Slow's service worker takes over while Slow is open, offer a reload.
@@ -2547,15 +2838,16 @@ function notify(message, actions = [], timeout = 7000) {
 if (navigator.serviceWorker) {
 	const hadWorker = Boolean(navigator.serviceWorker.controller);
 	navigator.serviceWorker.addEventListener("controllerchange", () => {
-		if (hadWorker) notify("Slow was updated.", [{ label: "Reload", run: () => location.reload() }], 0);
+		if (!hadWorker) return;
+		notify({
+			tone: "update",
+			key: "update",
+			title: "Slow was updated",
+			message: "Reload to start using the new version.",
+			actions: [{ label: "Reload", run: () => location.reload() }, { label: "Later" }],
+			timeout: 0,
+		});
 	});
-}
-
-function hideNotice() {
-	clearTimeout(noticeTimer);
-	if (notice.classList.contains("hidden")) return;
-	notice.classList.add("leaving");
-	setTimeout(() => notice.classList.add("hidden"), 200);
 }
 
 /* ============================================================
@@ -2610,7 +2902,14 @@ async function loadAnnouncements() {
 	const important = announcements.find((a) => a.important && !newsSeen.has(a.id) && !newsPopped.has(a.id));
 	if (important) {
 		newsPopped.add(important.id);
-		notify(important.title, [{ label: "Read", run: openNews }, { label: "Later" }], 0);
+		notify({
+			icon: "bell",
+			key: "news",
+			title: important.title,
+			message: important.message.length > 120 ? `${important.message.slice(0, 120)}…` : important.message,
+			actions: [{ label: "Read", run: openNews }, { label: "Later" }],
+			timeout: 0,
+		});
 	}
 }
 
@@ -2798,7 +3097,7 @@ function lockDev() {
 	devLogin = "";
 	showDevView();
 	devDialog.close();
-	notify("Dev mode is locked.");
+	notify({ icon: "lock", message: "Dev mode is locked." });
 }
 
 /* ---------- announcements, straight from the repository ---------- */
@@ -2862,9 +3161,9 @@ async function renderDevNews() {
 			try {
 				const { list: current, sha } = await readNewsFile();
 				await writeNewsFile(current.filter((x) => x.id !== a.id), sha, `Remove announcement: ${a.title}`);
-				notify("Removed. It disappears for everyone in about a minute.");
+				notify({ tone: "success", message: "Removed. It disappears for everyone in about a minute." });
 			} catch (err) {
-				notify(explainGithubError(err));
+				notify({ tone: "error", title: "Couldn't remove it", message: explainGithubError(err) });
 			}
 			renderDevNews();
 		});
@@ -2998,7 +3297,7 @@ const closedTabs = [];
 function reopenClosedTab() {
 	const last = closedTabs.pop();
 	if (!last) {
-		notify("There are no closed tabs to bring back.");
+		notify({ icon: "tab", message: "There are no closed tabs to bring back." });
 		return;
 	}
 	const tab = newTab();
@@ -3098,11 +3397,13 @@ function restoreSession() {
 	// Opening the tab you were on could crash Slow again, so every tab waits until you choose it.
 	newTab();
 	const suspect = saved.urls?.[saved.active] ? hostOf(saved.urls[saved.active]) : "";
-	notify(
-		`Slow stopped unexpectedly last time${suspect ? ` while ${suspect} was open` : ""}. Your tabs are back, and each one loads when you open it.`,
-		[{ label: "OK" }],
-		0,
-	);
+	notify({
+		tone: "warning",
+		title: "Slow stopped unexpectedly",
+		message: `That happened last time${suspect ? ` while ${suspect} was open` : ""}. Your tabs are back, and each one loads when you open it.`,
+		actions: [{ label: "OK" }],
+		timeout: 0,
+	});
 	return true;
 }
 
@@ -3202,17 +3503,20 @@ setInterval(() => {
 	if (Date.now() - activeSince < minutes * 60_000) return;
 
 	activeSince = Date.now();
-	notify(
-		`You've been browsing for ${breakLength(minutes)}. Take your time: look at something far away, stretch, or grab some water.`,
-		[
+	notify({
+		icon: "break",
+		key: "break",
+		title: "Time for a break",
+		message: `You've been browsing for ${breakLength(minutes)}. Look at something far away, stretch, or grab some water.`,
+		actions: [
 			{
 				label: "Remind me in 10 min",
 				run: () => (activeSince = Date.now() - Math.max(0, minutes - 10) * 60_000),
 			},
 			{ label: "Thanks", run: () => (activeSince = Date.now()) },
 		],
-		0,
-	);
+		timeout: 0,
+	});
 }, 30_000);
 
 /* ============================================================
@@ -3235,6 +3539,7 @@ const KIND_ICON = {
 	shortcut: "★",
 	history: "↺",
 	action: "›",
+	chat: "💬",
 };
 
 function paletteActions() {
@@ -3264,6 +3569,9 @@ function paletteActions() {
 			},
 		},
 		{ label: chatDock.hidden ? "Open chat" : "Close chat", hint: "Alt+C", run: toggleChat },
+		activeTab()?.url && { label: "Share this page in chat", detail: hostOf(activeTab().url), run: () => shareInChat(activeTab()) },
+		activeTab()?.url && { label: "Copy this page's link", detail: hostOf(activeTab().url), run: () => copyLink(activeTab()) },
+		{ label: "Keyboard shortcuts", hint: "?", run: openKeys },
 		{ label: "Settings", run: openSettings },
 		announcements.length && { label: "Announcements", run: openNews },
 		devToken && { label: "Dev mode", detail: devLogin, run: openDev },
@@ -3285,11 +3593,12 @@ function paletteActions() {
 				settings.breakMinutes = settings.breakMinutes ? 0 : 45;
 				activeSince = Date.now();
 				saveSettings();
-				notify(
-					settings.breakMinutes
+				notify({
+					icon: "break",
+					message: settings.breakMinutes
 						? "Break reminders are on. You can change how often in Settings."
 						: "Break reminders are off.",
-				);
+				});
 			},
 		},
 		recent.length && {
@@ -3297,7 +3606,7 @@ function paletteActions() {
 			run: () => {
 				recent = [];
 				writeList(RECENT_KEY, recent);
-				notify("History cleared.");
+				notify({ tone: "success", icon: "history", message: "History cleared." });
 			},
 		},
 	];
@@ -3334,9 +3643,21 @@ function buildPaletteItems(query) {
 		hint: "History",
 		run: () => navigate(activeTab(), r.url),
 	}));
+	// Your chats (once you've signed in to the chat): the ones with something new come first.
+	const chats = chatList().map((c) => ({
+		kind: "chat",
+		// (typing someone's name finds their chat first)
+		name: c.title,
+		label: c.kind === "dm" ? `Chat with ${c.title}` : c.kind === "global" ? "Global chat" : c.title,
+		detail: c.preview,
+		hint: c.unread ? "New" : "Chat",
+		img: c.avatar?.src || null,
+		unread: c.unread,
+		run: () => openChat(c.id),
+	}));
 
 	if (!words.length) {
-		return [...openTabs, ...paletteActions(), ...history.slice(0, 5)];
+		return [...chats.filter((c) => c.unread), ...openTabs, ...paletteActions(), ...history.slice(0, 5)];
 	}
 
 	// Typed something: offer to go there or search for it, plus everything that matches.
@@ -3367,8 +3688,8 @@ function buildPaletteItems(query) {
 	}
 	// Dev mode isn't listed anywhere; it only shows up when you type "dev".
 	const dev = !devToken && /\bdev/i.test(q) ? [{ kind: "action", label: "Dev mode", detail: "For Slow's developers", run: openDev }] : [];
-	const all = [...dev, ...openTabs, ...paletteActions(), ...saved, ...games, ...history].filter(matches);
-	const strong = all.filter((item) => item.label.toLowerCase().startsWith(words[0]));
+	const all = [...dev, ...openTabs, ...chats, ...paletteActions(), ...saved, ...games, ...history].filter(matches);
+	const strong = all.filter((item) => item.label.toLowerCase().startsWith(words[0]) || item.name?.toLowerCase().startsWith(words[0]));
 	const rest = all.filter((item) => !strong.includes(item));
 	return [...strong, go, ...rest].slice(0, 40);
 }
@@ -3503,6 +3824,13 @@ document.getElementById("btn-palette").addEventListener("click", openPalette);
    They work while focus is on Slow itself (not inside a website).
    ============================================================ */
 
+// Typing in a box (so a key is a letter, not a shortcut)?
+const typingIn = (el) => Boolean(el?.closest?.("input, textarea, select, [contenteditable=''], [contenteditable='true']"));
+
+// F5 or Ctrl+R (not with Shift, which still reloads everything).
+const isReloadKey = (event, mod) =>
+	!event.shiftKey && !event.altKey && ((event.key === "F5" && !mod) || (mod && event.code === "KeyR"));
+
 document.addEventListener("keydown", (event) => {
 	const mod = isMac ? event.metaKey : event.ctrlKey;
 
@@ -3512,9 +3840,57 @@ document.addEventListener("keydown", (event) => {
 		return;
 	}
 
+	// Reloading reloads the page you're looking at, not all of Slow (and every tab, game and call).
+	if (isReloadKey(event, mod) && reloadHere()) {
+		event.preventDefault();
+		return;
+	}
+
+	const plain = !event.ctrlKey && !event.metaKey && !event.altKey;
+	const overlay = document.querySelector("dialog[open]") || !gamesMenu.classList.contains("hidden");
+	// "?" shows every shortcut.
+	if (plain && event.key === "?" && !typingIn(event.target) && !document.querySelector("dialog[open]")) {
+		event.preventDefault();
+		openKeys();
+		return;
+	}
+	// On the new tab page, just start typing to search.
+	if (plain && event.key.length === 1 && event.key !== " " && !typingIn(event.target) && !overlay && showingHome()) {
+		homeSearch.focus();
+		return;
+	}
+
 	if (!event.altKey || event.ctrlKey || event.metaKey) return;
 	if (runShortcut(event.code, event.shiftKey)) event.preventDefault();
 });
+
+const showingHome = () => !home.classList.contains("hidden") && appView.classList.contains("hidden") && chatDock.hidden;
+
+// Every shortcut, in one place ("?", or "Keyboard shortcuts" in Ctrl+K).
+const keysDialog = document.getElementById("keys");
+function openKeys() {
+	if (palette.open) palette.close();
+	if (keysDialog.open) return;
+	keysDialog.showModal();
+	raiseTrail();
+}
+keysDialog.addEventListener("click", (event) => {
+	if (event.target === keysDialog || event.target.closest("[data-keys-close]")) keysDialog.close();
+});
+
+// What F5 / Ctrl+R reload: the app or the tab's page on screen. (On the new tab page there's
+// nothing but Slow, so Slow reloads as usual.)
+function reloadHere() {
+	if (shownApp && !appView.classList.contains("hidden")) {
+		document.getElementById("app-reload").click();
+		return true;
+	}
+	if (activeTab()?.frame && home.classList.contains("hidden")) {
+		reloadBtn.click();
+		return true;
+	}
+	return false;
+}
 
 // Slow's Alt shortcuts. Websites inside Slow pass them on too (browsing.js), so they work
 // wherever you are. Says whether it did something.
@@ -3523,7 +3899,13 @@ function runShortcut(code, shift) {
 	else if (code === "KeyT") newTab();
 	else if (code === "KeyW") closeTab(activeId);
 	else if (code === "KeyC") toggleChat();
-	else if (code === "KeyL") {
+	else if (code === "KeyK") openPalette();
+	else if (code === "ArrowLeft" || code === "ArrowRight") {
+		// back and forward, in the tab (or app) on screen
+		const step = code === "ArrowLeft" ? -1 : 1;
+		if (shownApp && !appView.classList.contains("hidden")) appStep(shownApp, step);
+		else frameAction(step < 0 ? "back" : "forward");
+	} else if (code === "KeyL") {
 		address.focus();
 		address.select();
 	} else if (/^Digit[1-8]$/.test(code)) {
@@ -3558,6 +3940,7 @@ function openLinkInTab(url, { background = false } = {}) {
 
 window.__slowOpenTab = openLinkInTab;
 window.__slowKey = runShortcut;
+window.__slowReload = reloadHere;
 
 // Pointing at a link shows where it goes, at the bottom left.
 const linkStatus = document.getElementById("link-status");
@@ -3691,7 +4074,7 @@ function toggleDarkForSite(host) {
 	else skip.splice(index, 1);
 	saveSettings();
 	refreshDarkMode();
-	notify(index === -1 ? `Dark mode is off for ${host}.` : `Dark mode is back on for ${host}.`);
+	notify({ icon: "moon", message: index === -1 ? `Dark mode is off for ${host}.` : `Dark mode is back on for ${host}.` });
 }
 
 /* ============================================================
@@ -3882,6 +4265,19 @@ function refreshTabMenu() {
 	tabMenu.querySelector("[data-action=duplicate]").disabled =
 		tabs.length >= MAX_TABS || !(menuTab.url || menuTab.pendingUrl);
 	tabMenu.querySelector("[data-action=reload]").disabled = !menuTab.frame;
+	tabMenu.querySelector("[data-action=copy]").disabled = !menuTab.url;
+	tabMenu.querySelector("[data-action=share]").disabled = !menuTab.url;
+}
+
+// The real address of a tab's page (not Slow's proxied one).
+async function copyLink(tab) {
+	if (!tab?.url) return;
+	try {
+		await navigator.clipboard.writeText(tab.url);
+		notify({ tone: "success", icon: "tab", message: "Link copied.", timeout: 2500 });
+	} catch {
+		notify({ tone: "error", message: "Couldn't copy the link." });
+	}
 }
 
 function openTabMenu(tab, x, y) {
@@ -3928,6 +4324,10 @@ tabMenu.addEventListener("click", (event) => {
 			setTabVolume(copy, { volume: tab.volume, muted: tab.muted });
 			navigate(copy, tab.url || tab.pendingUrl, { here: true });
 		}
+	} else if (action === "copy") {
+		copyLink(tab);
+	} else if (action === "share") {
+		shareInChat(tab);
 	} else if (action === "close-others") {
 		for (const other of tabs.filter((t) => t !== tab)) closeTab(other.id);
 		activate(tab.id);
@@ -4296,6 +4696,14 @@ collectionsLabel.textContent = "Collections";
 gamesViews.append(collectionsLabel);
 for (const source of GAME_SOURCES) gamesViews.append(viewButton(source, "collection"));
 const gamesViewBtns = gamesViews.querySelectorAll("[data-view]");
+// Liquid glass (liquid.js): a drop of glass marks the open list and flows to the next one you pick.
+const gamesLens = Liquid.lens(gamesViews);
+// ...another follows the pointer over the bar's buttons...
+Liquid.lens(document.querySelector(".games-bar"), { hover: ".games-bar > .icon-btn", className: "small" });
+// ...and cards lean toward the pointer and catch the light.
+Liquid.tilt(gamesBody, { item: ".game-open", part: ".game-frame" });
+Liquid.tilt(gamesBody, { item: ".games-collection", angle: 6, lift: 3 });
+Liquid.tilt(gamesBody, { item: ".games-hero-art", angle: 10, lift: 2 });
 
 const knownView = (id) =>
 	id === "home" || id === "favorites" || id === "all" || Boolean(CARD_LISTS[id]) || Boolean(gameSource(id));
@@ -4332,6 +4740,7 @@ function updateViewCounts() {
 		if (current) btn.setAttribute("aria-current", "page");
 		else btn.removeAttribute("aria-current");
 	}
+	gamesLens.to(gamesViews.querySelector(".games-view.on"));
 }
 
 /* ---------- games you opened lately ---------- */
@@ -5028,9 +5437,13 @@ function closeApp({ toGames = false } = {}) {
 	if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
 	if (run?.app.keep) {
 		run.frame.frame.hidden = true;
-		notify(`${run.app.name} keeps playing. Open it again from the new tab page to get back to it.`, [
-			{ label: "Stop it", run: () => stopApp(id) },
-		]);
+		notify({
+			icon: run.app.icon(),
+			key: `app:${id}`,
+			title: `${run.app.name} keeps playing`,
+			message: "Open it again from the new tab page to get back to it.",
+			actions: [{ label: "Stop it", run: () => stopApp(id) }],
+		});
 	} else {
 		stopApp(id);
 	}
@@ -5275,7 +5688,8 @@ function setChatMode(mode) {
 	applyChatMode();
 }
 
-function openChat(convId) {
+// (unread: opened with the chat button or Alt+C, so it goes straight to whatever's new)
+function openChat(convId, { unread = false } = {}) {
 	loadChat();
 	if (chatDock.hidden) {
 		chatDock.hidden = false;
@@ -5286,12 +5700,44 @@ function openChat(convId) {
 		playEnter(chatDock);
 	}
 	showChatCall();
+	dismissNotices("chat:");
 	withChat((api) => {
 		if (convId) api.openConv(convId);
-		api.shown();
+		else if (unread) api.openUnread?.();
 	});
 	chatFrame.focus();
+	// (once it's on screen: until then nothing in it can take the keyboard, so you can type straight away)
+	requestAnimationFrame(() => withChat((api) => api.shown()));
 }
+
+// Your chats, for Ctrl+K (none until you've signed in to the chat).
+function chatList() {
+	try {
+		const api = chatFrame?.contentWindow?.__chat;
+		return api?.signedIn?.() ? api.chats?.() || [] : [];
+	} catch {
+		return [];
+	}
+}
+
+// Sharing a page: the chat opens, you pick who it's for, and its link is ready to send there.
+function shareInChat(tab) {
+	const url = tab?.url;
+	if (!url) return;
+	// (a page that didn't load has Slow's "Couldn't load" title, which isn't the page's)
+	const title = /^Couldn't load /.test(tab.title || "") ? "" : tab.title;
+	openChat();
+	withChat((api) => {
+		if (!api.share?.({ url, title })) notify({ tone: "chat", message: "Sign in to the chat, then share the page again." });
+	});
+}
+
+// Closing or reloading Slow in the middle of a call would hang up, so the browser asks first.
+window.addEventListener("beforeunload", (event) => {
+	if (!chatCallState) return;
+	event.preventDefault();
+	event.returnValue = "";
+});
 
 function closeChat() {
 	if (chatDock.hidden) return;
@@ -5320,7 +5766,7 @@ settingsForm.addEventListener("change", (event) => {
 applyChatMode();
 
 function toggleChat() {
-	if (chatDock.hidden) openChat();
+	if (chatDock.hidden) openChat(null, { unread: true });
 	else closeChat();
 }
 
@@ -5329,11 +5775,7 @@ chatBtn.addEventListener("click", toggleChat);
 // What the chat asks of Slow (chat/chat.js).
 window.__slowChat = {
 	openTab: (url) => openLinkInTab(url),
-	notify(message, actions, timeout) {
-		// (never over a notice that's waiting for an answer, like "Slow was updated")
-		if (!notice.classList.contains("hidden") && !notice.classList.contains("timed")) return;
-		notify(message, actions, timeout);
-	},
+	notify: (options) => notify(options),
 	open: openChat,
 	close: closeChat,
 	toggle: toggleChat,
@@ -5418,22 +5860,18 @@ try {
    All of these skip themselves when "Reduce motion" is on.
    ============================================================ */
 
-/* ---------- a glass highlight that glides to the active tab ---------- */
+/* ---------- liquid glass (liquid.js) ---------- */
 
+// The open tab is a drop of glass that flows to whichever tab you open, stretching on the way.
 const tabGlider = document.createElement("div");
-tabGlider.className = "tab-glider";
+tabGlider.className = "tab-glider liquid-glass";
 tabGlider.setAttribute("aria-hidden", "true");
 tabStrip.prepend(tabGlider);
+const tabLens = Liquid.lens(tabStrip, { element: tabGlider, track: "x" });
 
 function placeTabGlider() {
 	const el = activeTab()?.el;
-	if (!el || !el.isConnected) {
-		tabGlider.style.opacity = "0";
-		return;
-	}
-	tabGlider.style.opacity = "1";
-	tabGlider.style.width = `${el.offsetWidth}px`;
-	tabGlider.style.transform = `translateX(${el.offsetLeft}px)`;
+	tabLens.to(el?.isConnected ? el : null);
 }
 
 // Tabs change size as they open, close and the window resizes, so follow them.
@@ -5446,10 +5884,11 @@ new MutationObserver(() => {
 	}
 	placeTabGlider();
 }).observe(tabStrip, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
-
 placeTabGlider();
-// The first placement jumps straight there; after that it glides.
-requestAnimationFrame(() => requestAnimationFrame(() => tabGlider.classList.add("ready")));
+
+// The toolbar's buttons and the new tab page's apps: a drop of glass follows your pointer between them.
+Liquid.lens(document.querySelector(".toolbar"), { hover: ".toolbar > .icon-btn", className: "small" });
+Liquid.lens(document.querySelector(".home-apps"), { hover: ".home-app", className: "small" });
 
 /* ---------- start up: bring back last time's tabs, or open a fresh one ---------- */
 
@@ -5469,7 +5908,7 @@ if (!restoreSession()) newTab();
 	if (!/^wss?:\/\/[^\s/]+/i.test(wispUrl)) return;
 	settings.wispUrl = wispUrl;
 	saveSettings();
-	notify("Websites now load through your own server. You can change this in Settings > Connection.");
+	notify({ tone: "success", icon: "server", title: "Using your own server", message: "Websites now load through your computer. You can change this in Settings > Connection." });
 })();
 
 // Connect to the proxy now, so the first site you open (and restored tabs' icons) don't wait for it.

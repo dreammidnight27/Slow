@@ -25,10 +25,21 @@
 	--good: #6dffb1;
 	--bad: #ff6b8a;
 
-	--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-	--fast: 140ms;
-	--mid: 220ms;
+	/* liquid, like Slow: things spring into place and settle like water */
+	--ease-liquid: cubic-bezier(0.34, 1.56, 0.64, 1);
+	--ease-jelly: cubic-bezier(0.34, 1.8, 0.5, 1);
+	--ease-out: var(--ease-liquid);
+	--fast: 180ms;
+	--mid: 400ms;
+	--slow: 640ms;
 	color-scheme: dark;
+}
+
+@supports (transition-timing-function: linear(0, 1)) {
+	:root {
+		--ease-liquid: linear(0, 0.0231, 0.085, 0.1752, 0.284, 0.4029, 0.5246, 0.6431, 0.7537, 0.8532, 0.9393, 1.0108, 1.0676, 1.11, 1.139, 1.1561, 1.1628, 1.1609, 1.1522, 1.1385, 1.1214, 1.1023, 1.0825, 1.063, 1.0445, 1.0278, 1.0132, 1.0009, 0.9911, 0.9836, 0.9783, 0.9751, 0.9736, 0.9736, 0.9747, 0.9768, 0.9795, 0.9825, 0.9857, 0.9889, 0.992, 0.9948, 0.9973, 0.9994, 1.0011, 1.0024, 1.0033, 1.004, 1.0043, 1.0043, 1.0042, 1.0039, 1.0035, 1.003, 1.0025, 1.0019, 1);
+		--ease-jelly: linear(0, 0.0328, 0.1211, 0.249, 0.4013, 0.5637, 0.7242, 0.8729, 1.0024, 1.1081, 1.1876, 1.2407, 1.2688, 1.2747, 1.262, 1.235, 1.1981, 1.1553, 1.1104, 1.0668, 1.0269, 0.9925, 0.965, 0.9447, 0.9316, 0.9252, 0.9248, 0.9292, 0.9373, 0.9479, 0.9599, 0.9722, 0.9841, 0.9948, 1.0038, 1.011, 1.0162, 1.0193, 1.0207, 1.0205, 1.0191, 1.0167, 1.0136, 1.0103, 1.0069, 1.0037, 1.0009, 0.9985, 0.9966, 0.9953, 0.9946, 0.9943, 0.9944, 0.9949, 0.9956, 0.9964, 0.9974, 0.9983, 0.9992, 0.9999, 1.0005, 1.001, 1.0013, 1.0015, 1);
+	}
 }
 
 * {
@@ -169,10 +180,6 @@ button {
 	background: var(--glass-strong);
 }
 
-.btn:active {
-	transform: scale(0.97);
-}
-
 .btn.primary {
 	border-color: transparent;
 	background: var(--aurora);
@@ -289,6 +296,60 @@ button {
 	display: contents;
 }
 
+/* rings people pick for their picture, in their color */
+.avatar {
+	--fw: max(2px, calc(var(--size) * 0.055));
+	--fgap: max(1.5px, calc(var(--size) * 0.045));
+	--ring: var(--tint, var(--aurora));
+}
+
+.avatar[data-frame="ring"] {
+	outline: var(--fw) solid var(--ring);
+	outline-offset: var(--fgap);
+}
+
+.avatar[data-frame="glow"] {
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.25),
+		0 0 0 var(--fw) color-mix(in srgb, var(--ring) 60%, transparent),
+		0 0 calc(var(--size) * 0.45) calc(var(--size) * 0.06) color-mix(in srgb, var(--ring) 55%, transparent);
+}
+
+/* (a ring of colors that slowly turns) */
+.avatar[data-frame="aurora"]::before {
+	content: "";
+	position: absolute;
+	inset: calc(-1 * (var(--fw) + var(--fgap)));
+	border-radius: 50%;
+	background: conic-gradient(var(--ring), var(--aurora), var(--ember), #7dd3fc, var(--ring));
+	-webkit-mask: radial-gradient(farthest-side, transparent calc(100% - var(--fw) - 0.5px), #000 calc(100% - var(--fw)));
+	mask: radial-gradient(farthest-side, transparent calc(100% - var(--fw) - 0.5px), #000 calc(100% - var(--fw)));
+	pointer-events: none;
+	animation: frame-turn 6s linear infinite;
+}
+
+@keyframes frame-turn {
+	to {
+		transform: rotate(1turn);
+	}
+}
+
+/* their status emoji, on their picture */
+.avatar .mood {
+	position: absolute;
+	top: -5px;
+	right: -7px;
+	display: grid;
+	place-items: center;
+	width: 21px;
+	height: 21px;
+	border-radius: 50%;
+	background: var(--raised);
+	box-shadow: 0 0 0 2px var(--void);
+	font-size: 12px;
+	line-height: 1;
+}
+
 /* ---------- loading ---------- */
 
 .boot {
@@ -386,6 +447,7 @@ button {
 }
 
 .auth-tabs {
+	position: relative;
 	display: grid;
 	grid-template-columns: 1fr 1fr;
 	width: 100%;
@@ -411,6 +473,20 @@ button {
 .auth-tab[aria-selected="true"] {
 	background: var(--glass-strong);
 	color: var(--text);
+}
+
+/* (a drop of glass slides between the two instead: liquid.js) */
+.auth-tabs.has-lens .auth-tab {
+	position: relative;
+	z-index: 1;
+}
+
+.auth-tabs.has-lens .auth-tab[aria-selected="true"] {
+	background: none;
+}
+
+.auth-tabs .liquid-lens {
+	border-radius: 17px;
 }
 
 .auth-form {
@@ -793,6 +869,12 @@ button {
 	white-space: nowrap;
 }
 
+/* (something you'd started writing there) */
+.draft-tag {
+	color: color-mix(in srgb, var(--aurora) 85%, white);
+	font-weight: 600;
+}
+
 .conv.unread .conv-name {
 	font-weight: 600;
 }
@@ -869,8 +951,11 @@ button {
 }
 
 .me-sub {
+	overflow: hidden;
 	font-size: 12px;
 	color: var(--muted);
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 /* ---------- the open conversation ---------- */
@@ -934,7 +1019,8 @@ button {
 	white-space: nowrap;
 }
 
-.room-sub.live {
+.room-sub.live,
+.room-sub .live {
 	color: var(--good);
 }
 
@@ -1117,6 +1203,11 @@ button {
 
 .msg-name:hover {
 	text-decoration: underline;
+}
+
+/* (in the color they picked, made light enough to read) */
+.msg-name.colored {
+	color: color-mix(in oklab, var(--name) 72%, white);
 }
 
 .lv {
@@ -1307,10 +1398,6 @@ button {
 	background: var(--glass-strong);
 }
 
-.reaction:active {
-	transform: scale(0.92);
-}
-
 .reaction.mine {
 	border-color: color-mix(in srgb, var(--aurora) 60%, transparent);
 	background: var(--accent-soft);
@@ -1389,6 +1476,29 @@ button {
 	color: var(--bad);
 }
 
+/* deleting someone else's message, as the owner: in the owner tag's colors, with its mark */
+.tool.danger.as-owner {
+	position: relative;
+	color: #ff4fa0;
+}
+
+.tool.danger.as-owner::after {
+	content: "";
+	position: absolute;
+	top: 3px;
+	right: 3px;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: linear-gradient(135deg, #ff007a, #7928ca);
+	box-shadow: 0 0 0 1.5px var(--panel), 0 0 6px rgba(255, 0, 122, 0.6);
+}
+
+.tool.danger.as-owner:hover {
+	background: rgba(255, 0, 122, 0.16);
+	color: #ff7ab8;
+}
+
 .tool .ico {
 	width: 16px;
 	height: 16px;
@@ -1396,7 +1506,7 @@ button {
 
 @keyframes pop {
 	from {
-		transform: translateY(3px) scale(0.96);
+		transform: translateY(4px) scale(0.9, 1.08);
 		opacity: 0;
 	}
 }
@@ -1458,16 +1568,20 @@ button {
 	animation-delay: 0.3s;
 }
 
+/* the typing dots: little drops that stretch as they jump and squash when they land */
 @keyframes bounce {
 	0%,
-	60%,
+	70%,
 	100% {
 		transform: none;
 		opacity: 0.4;
 	}
-	30% {
-		transform: translateY(-4px);
+	28% {
+		transform: translateY(-5px) scale(0.8, 1.25);
 		opacity: 1;
+	}
+	50% {
+		transform: translateY(0) scale(1.3, 0.75);
 	}
 }
 
@@ -1499,7 +1613,10 @@ button {
 #text {
 	flex: 1;
 	min-width: 0;
+	/* (never shorter than one line) */
+	min-height: calc(1.4em + 14px);
 	max-height: 140px;
+	overflow-y: hidden;
 	padding: 7px 0;
 	border: 0;
 	background: none;
@@ -1596,8 +1713,18 @@ button {
 	text-align: left;
 }
 
-.cmd-hint button:hover {
+.cmd-hint button:hover,
+.cmd-hint button.on {
 	background: var(--glass-strong);
+}
+
+/* (someone to @mention: their picture and name) */
+.cmd-hint button:has(.avatar) {
+	align-items: center;
+}
+
+.cmd-hint .avatar {
+	align-self: center;
 }
 
 .cmd-hint b {
@@ -1764,7 +1891,7 @@ button {
 
 @keyframes rise {
 	from {
-		transform: translateY(8px);
+		transform: translateY(12px) scale(0.93, 1.05);
 		opacity: 0;
 	}
 }
@@ -1777,23 +1904,159 @@ button {
 	overflow-x: hidden;
 }
 
-.profile-banner {
-	height: 74px;
-	margin: 0 -22px -38px;
+/* the profile tinted in their color */
+#profile {
+	--pf: var(--aurora);
 	background:
-		radial-gradient(60% 120% at 20% 0%, color-mix(in srgb, var(--tint, var(--aurora)) 70%, transparent), transparent 70%),
-		linear-gradient(120deg, color-mix(in srgb, var(--tint, var(--aurora)) 45%, var(--void)), color-mix(in srgb, var(--nebula) 60%, var(--void)));
+		radial-gradient(130% 55% at 50% 0%, color-mix(in srgb, var(--pf) 22%, transparent), transparent 75%),
+		var(--glass-panel, var(--panel));
+}
+
+.profile-banner {
+	flex: none;
+	height: 104px;
+	margin: 0 -22px -40px;
+}
+
+/* banners: their color, a few skies, or their own picture */
+.banner {
+	--tint: var(--aurora);
+	position: relative;
+	background-color: var(--banner-base, var(--panel));
+	background-image: var(--banner-bg);
+	background-position: center;
+	background-size: cover;
+}
+
+.banner[data-banner="color"] {
+	--banner-bg:
+		radial-gradient(60% 120% at 20% 0%, color-mix(in srgb, var(--tint) 70%, transparent), transparent 70%),
+		linear-gradient(120deg, color-mix(in srgb, var(--tint) 45%, var(--void)), color-mix(in srgb, var(--nebula) 60%, var(--void)));
+}
+
+.banner[data-banner="nebula"] {
+	--banner-base: #120a2a;
+	--banner-bg:
+		radial-gradient(1.5px 1.5px at 12% 30%, #fff 50%, transparent 51%),
+		radial-gradient(1.5px 1.5px at 38% 72%, #fff 50%, transparent 51%),
+		radial-gradient(1px 1px at 62% 22%, #fff 50%, transparent 51%),
+		radial-gradient(1.5px 1.5px at 84% 58%, #fff 50%, transparent 51%),
+		radial-gradient(1px 1px at 92% 16%, #fff 50%, transparent 51%),
+		radial-gradient(1px 1px at 24% 82%, #fff 50%, transparent 51%),
+		radial-gradient(70% 140% at 85% 10%, #8b5cf6b0, transparent 60%),
+		radial-gradient(60% 120% at 15% 100%, #ec489970, transparent 65%),
+		radial-gradient(50% 100% at 45% 40%, #3b82f655, transparent 70%);
+}
+
+.banner[data-banner="aurora"] {
+	--banner-base: #061722;
+	--banner-bg:
+		radial-gradient(1px 1px at 18% 20%, #fff 50%, transparent 51%),
+		radial-gradient(1.5px 1.5px at 76% 14%, #fff 50%, transparent 51%),
+		radial-gradient(1px 1px at 52% 34%, #fff 50%, transparent 51%),
+		radial-gradient(60% 70% at 28% 0%, #34d399b0, transparent 70%),
+		radial-gradient(55% 90% at 72% 8%, #8b5cf6a0, transparent 70%),
+		linear-gradient(172deg, transparent 32%, #22d3ee44 56%, transparent 82%),
+		linear-gradient(180deg, transparent 60%, #04101a);
+}
+
+.banner[data-banner="midnight"] {
+	--banner-base: #05060f;
+	--banner-bg:
+		radial-gradient(circle at 82% 34%, #f3eeff 0 9px, #f3eeff40 10px, transparent 28px),
+		radial-gradient(1.5px 1.5px at 10% 24%, #fff 50%, transparent 51%),
+		radial-gradient(1px 1px at 28% 60%, #fff 50%, transparent 51%),
+		radial-gradient(1.5px 1.5px at 46% 18%, #fff 50%, transparent 51%),
+		radial-gradient(1px 1px at 58% 70%, #fff 50%, transparent 51%),
+		radial-gradient(1px 1px at 68% 30%, #fff 50%, transparent 51%),
+		radial-gradient(1.5px 1.5px at 94% 76%, #fff 50%, transparent 51%),
+		linear-gradient(180deg, #05060f 0%, #0b1028 60%, #1b1446 100%);
+}
+
+.banner[data-banner="sunset"] {
+	--banner-base: #2b1055;
+	--banner-bg:
+		radial-gradient(20% 45% at 70% 100%, #ffd29bd0, transparent 70%),
+		linear-gradient(176deg, #2b1055 0%, #7b2c8f 38%, #e0577a 70%, #f9a65a 100%);
+}
+
+.banner[data-banner="ocean"] {
+	--banner-base: #03162b;
+	--banner-bg:
+		radial-gradient(60% 90% at 20% 0%, #38bdf855, transparent 70%),
+		linear-gradient(172deg, #03162b 0%, #054a6b 48%, #0e8aa8 80%, #7ee0f0 100%);
+}
+
+.banner[data-banner="forest"] {
+	--banner-base: #03130c;
+	--banner-bg:
+		radial-gradient(50% 80% at 78% 0%, #bef26444, transparent 70%),
+		linear-gradient(172deg, #03130c 0%, #0b3a28 50%, #1d7a4c 82%, #8be3a8 100%);
+}
+
+.banner[data-banner="ember"] {
+	--banner-base: #160404;
+	--banner-bg:
+		radial-gradient(40% 70% at 30% 100%, #fbbf2466, transparent 70%),
+		linear-gradient(172deg, #160404 0%, #571010 42%, #c2410c 78%, #fbbf24 100%);
+}
+
+.banner[data-banner="rose"] {
+	--banner-base: #22081a;
+	--banner-bg:
+		radial-gradient(50% 90% at 80% 0%, #fbcfe855, transparent 70%),
+		linear-gradient(172deg, #22081a 0%, #7d1846 45%, #d6457f 78%, #f9c6dc 100%);
+}
+
+.banner[data-banner="picture"] {
+	--banner-bg: var(--banner-pic);
 }
 
 .profile-top {
+	position: relative;
 	display: flex;
 	align-items: flex-end;
 	gap: 14px;
 }
 
 .profile-top .avatar {
+	--fgap: 4px;
 	border: 4px solid var(--panel);
 	box-sizing: content-box;
+}
+
+.profile-top .avatar[data-frame="ring"] {
+	outline-offset: 0;
+}
+
+.pronouns {
+	color: var(--muted);
+	font-size: 13px;
+	font-weight: 500;
+}
+
+/* their status, like something they're saying */
+.mood-line {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 0;
+	padding: 8px 12px;
+	border: 1px solid color-mix(in srgb, var(--pf, var(--aurora)) 26%, var(--line));
+	border-radius: 4px 14px 14px 14px;
+	background: color-mix(in srgb, var(--pf, var(--aurora)) 10%, var(--glass));
+	font-size: 13.5px;
+	overflow-wrap: anywhere;
+}
+
+.mood-emoji {
+	flex: none;
+	font-size: 17px;
+	line-height: 1;
+}
+
+.mood-emoji:empty {
+	display: none;
 }
 
 .profile-names {
@@ -1827,73 +2090,221 @@ button {
 	margin-top: 5px;
 }
 
+/* level, rank and a couple of facts, in one row: a ring around the level fills with XP */
 .level-card {
+	--rank: var(--aurora);
 	display: flex;
-	flex-direction: column;
-	gap: 7px;
-	padding: 12px 14px;
+	flex: none;
+	align-items: center;
+	gap: 12px;
+	padding: 9px 14px 9px 10px;
 	border: 1px solid var(--line);
-	border-radius: 14px;
-	background: var(--glass);
+	border-radius: 16px;
+	background:
+		radial-gradient(90% 160% at 0% 50%, color-mix(in srgb, var(--rank) 16%, transparent), transparent 60%),
+		var(--glass);
 }
 
-.level-row {
-	display: flex;
-	align-items: baseline;
-	justify-content: space-between;
+/* (registered, so the ring fills smoothly) */
+@property --p {
+	syntax: "<number>";
+	inherits: true;
+	initial-value: 0;
 }
 
-.level-row.muted {
-	color: var(--muted);
-	font-size: 12px;
+.level-ring {
+	--p: 0;
+	position: relative;
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 42px;
+	height: 42px;
+	transition: --p 0.9s var(--ease-out);
 }
 
-.rank {
-	color: var(--rank);
-	font: 500 12px/1 "Unbounded", sans-serif;
-	letter-spacing: 0.06em;
-	text-transform: uppercase;
+.level-ring::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	border-radius: 50%;
+	background: conic-gradient(var(--rank) calc(var(--p) * 1%), color-mix(in srgb, var(--starlight) 10%, transparent) 0);
+	-webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3.5px));
+	mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3.5px));
+	filter: drop-shadow(0 0 4px color-mix(in srgb, var(--rank) 55%, transparent));
 }
 
 .level-num {
-	font-weight: 600;
+	position: relative;
+	font: 600 15px/1 "Unbounded", sans-serif;
 }
 
-.xp-track {
-	height: 7px;
-	border-radius: 4px;
-	background: var(--glass-strong);
+.level-text {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	gap: 5px;
+	min-width: 0;
+}
+
+.rank {
 	overflow: hidden;
+	color: var(--rank);
+	font: 500 11.5px/1 "Unbounded", sans-serif;
+	letter-spacing: 0.06em;
+	text-overflow: ellipsis;
+	text-transform: uppercase;
+	white-space: nowrap;
 }
 
-.xp-fill {
-	height: 100%;
-	border-radius: 4px;
-	background: linear-gradient(90deg, var(--nebula), var(--aurora), var(--ember));
-	transition: width 0.5s var(--ease-out);
+.xp-text {
+	overflow: hidden;
+	color: var(--muted);
+	font-size: 12px;
+	line-height: 1;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .facts {
-	display: grid;
-	grid-template-columns: 1fr 1fr;
-	gap: 8px;
-	margin: 4px 0 0;
+	display: flex;
+	flex: none;
+	gap: 14px;
+	margin: 0;
+	padding-left: 14px;
+	border-left: 1px solid var(--line);
 }
 
+/* (the number above its name) */
 .facts div {
-	padding: 8px 10px;
-	border-radius: 10px;
-	background: var(--glass);
+	display: flex;
+	flex-direction: column-reverse;
+	gap: 3px;
 }
 
 .facts dt {
 	color: var(--faint);
-	font-size: 11.5px;
+	font-size: 11px;
+	line-height: 1;
 }
 
 .facts dd {
 	margin: 0;
+	font-size: 14px;
 	font-weight: 600;
+	line-height: 1.1;
+	white-space: nowrap;
+}
+
+/* the drawer the stats open in (its spacing is inside it, so opening it doesn't jump) */
+.stats-drawer {
+	flex: none;
+	margin-top: -14px;
+	overflow: hidden;
+}
+
+.stats-inner {
+	padding-top: 14px;
+}
+
+.stats-drawer .level-card {
+	transform-origin: 18% 100%;
+	will-change: transform, opacity;
+}
+
+/* the profile's buttons: Stats on the left, the rest on the right */
+.profile-actions {
+	align-items: center;
+}
+
+.stats-btn {
+	margin-right: auto;
+	padding: 0 12px 0 11px;
+	transition:
+		background var(--fast) ease,
+		box-shadow var(--fast) ease,
+		border-color var(--fast) ease;
+}
+
+.stats-btn .ico {
+	width: 16px;
+	height: 16px;
+}
+
+.stats-btn .chev {
+	width: 14px;
+	height: 14px;
+	margin-left: -1px;
+	color: var(--muted);
+	transition: transform var(--mid) var(--ease-jelly);
+}
+
+/* (open: a drop of glass, its arrow turned over) */
+.stats-btn[aria-expanded="true"] {
+	border-color: transparent;
+	background: var(--liquid-fill, var(--glass-strong));
+	box-shadow:
+		var(--liquid-rim, none),
+		0 8px 22px -10px color-mix(in srgb, var(--aurora) 60%, transparent);
+	backdrop-filter: var(--liquid-backdrop, none);
+	-webkit-backdrop-filter: var(--liquid-backdrop, none);
+}
+
+.stats-btn[aria-expanded="true"] .chev {
+	transform: rotate(180deg);
+}
+
+.btn-icon {
+	width: 36px;
+	padding: 0;
+}
+
+.btn-icon .ico {
+	width: 17px;
+	height: 17px;
+}
+
+/* (narrow, like on a phone: everything a little closer together, so long ranks still fit) */
+.level-card-box {
+	container-type: inline-size;
+}
+
+@container (max-width: 330px) {
+	.level-card {
+		gap: 9px;
+		padding: 8px 11px 8px 8px;
+	}
+
+	.level-ring {
+		width: 36px;
+		height: 36px;
+	}
+
+	.level-num {
+		font-size: 13px;
+	}
+
+	.rank {
+		font-size: 10px;
+		letter-spacing: 0.04em;
+	}
+
+	.xp-text {
+		font-size: 11px;
+	}
+
+	.facts {
+		gap: 10px;
+		padding-left: 9px;
+	}
+
+	.facts dd {
+		font-size: 13px;
+	}
+
+	.facts dt {
+		font-size: 10.5px;
+	}
 }
 
 .bio {
@@ -1907,27 +2318,582 @@ button {
 	font-style: italic;
 }
 
-/* editing your profile */
+/* editing your profile: a preview of it beside the choices (above them, when narrow) */
 
-.edit-pic {
-	display: flex;
-	align-items: center;
-	gap: 16px;
+.edit-sheet {
+	--pf: var(--aurora);
+	width: min(780px, calc(100vw - 24px));
 }
 
-.edit-pic-actions {
+.edit-layout {
+	display: grid;
+	gap: 18px;
+}
+
+/* (Save and Cancel stay in reach while you scroll through the choices, on short screens like a
+   Chromebook's) */
+.edit-sheet > .sheet-actions {
+	position: sticky;
+	bottom: -22px;
+	z-index: 2;
+	margin: 0 -22px -22px;
+	padding: 12px 22px 18px;
+	border-top: 1px solid var(--line);
+	background: color-mix(in srgb, var(--panel) 88%, transparent);
+	backdrop-filter: blur(14px);
+	-webkit-backdrop-filter: blur(14px);
+}
+
+@media (min-width: 720px) {
+	.edit-layout {
+		grid-template-columns: 300px minmax(0, 1fr);
+		align-items: start;
+	}
+
+	.edit-preview {
+		position: sticky;
+		top: 0;
+	}
+}
+
+.edit-preview {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	min-width: 0;
+}
+
+.preview-card {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 0 16px 16px;
+	border: 1px solid var(--line);
+	border-radius: 18px;
+	background:
+		radial-gradient(130% 60% at 50% 0%, color-mix(in srgb, var(--pf) 20%, transparent), transparent 75%),
+		color-mix(in srgb, var(--void) 55%, transparent);
+	overflow: hidden;
+	transition: background var(--mid) ease;
+}
+
+.preview-banner {
+	display: block;
+	width: calc(100% + 32px);
+	height: 96px;
+	margin: 0 -16px -40px;
+	padding: 0;
+	border: 0;
+}
+
+.banner-hint {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 4px 10px 4px 8px;
+	border-radius: 999px;
+	background: rgba(0, 0, 0, 0.5);
+	color: #fff;
+	font-size: 12px;
+	font-weight: 500;
+	opacity: 0;
+	transition: opacity var(--fast) ease;
+}
+
+.banner-hint .ico {
+	width: 14px;
+	height: 14px;
+}
+
+.preview-banner:hover .banner-hint,
+.preview-banner:focus-visible .banner-hint {
+	opacity: 1;
+}
+
+.preview-avatar {
+	position: relative;
+	flex: none;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: none;
+}
+
+.avatar-hint {
+	position: absolute;
+	inset: 4px;
+	display: grid;
+	place-items: center;
+	border-radius: 50%;
+	background: rgba(0, 0, 0, 0.5);
+	color: #fff;
+	opacity: 0;
+	transition: opacity var(--fast) ease;
+}
+
+.preview-avatar:hover .avatar-hint,
+.preview-avatar:focus-visible .avatar-hint {
+	opacity: 1;
+}
+
+.preview-card .profile-name {
+	font-size: 17px;
+}
+
+.preview-card .bio {
+	font-size: 13.5px;
+}
+
+/* how you look in a chat */
+.preview-msg {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 10px 12px;
+	border: 1px solid var(--line);
+	border-radius: 14px;
+	background: color-mix(in srgb, var(--void) 45%, transparent);
+}
+
+.preview-msg > div {
 	display: flex;
 	flex-direction: column;
 	align-items: flex-start;
-	gap: 6px;
+	gap: 3px;
+	min-width: 0;
 }
 
-.edit-pic-actions .btn {
+.preview-msg-name {
+	color: color-mix(in srgb, var(--aurora) 75%, white);
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.preview-msg-name.colored {
+	color: color-mix(in oklab, var(--name) 72%, white);
+}
+
+.preview-bubble {
+	padding: 7px 12px;
+	border-radius: 4px 16px 16px 16px;
+	background: var(--glass-strong);
+	font-size: 13.5px;
+}
+
+.edit-controls {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	min-width: 0;
+}
+
+.edit-group {
+	display: flex;
+	flex-direction: column;
+	gap: 9px;
+	margin: 0;
+}
+
+.edit-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+
+.edit-row label.btn {
 	cursor: pointer;
+}
+
+.edit-row .ico {
+	width: 16px;
+	height: 16px;
+}
+
+.edit-url {
+	flex-direction: row;
+}
+
+.edit-url input {
+	flex: 1;
+	min-width: 0;
 }
 
 .field-count {
 	font-weight: 400;
+}
+
+/* rings */
+.frame-tiles {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 8px;
+}
+
+.frame-tile {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 7px;
+	padding: 12px 4px 8px;
+	border: 1px solid var(--line);
+	border-radius: 14px;
+	background: var(--glass);
+	color: var(--muted);
+	font-size: 12px;
+	transition:
+		border-color var(--fast) ease,
+		background var(--fast) ease;
+}
+
+.frame-face {
+	display: grid;
+	place-items: center;
+	height: 46px;
+}
+
+.frame-tile:hover {
+	background: var(--glass-strong);
+}
+
+.frame-tile[aria-pressed="true"],
+.status-pick[aria-pressed="true"] {
+	border-color: color-mix(in srgb, var(--pf) 70%, transparent);
+	background: color-mix(in srgb, var(--pf) 14%, var(--glass));
+	color: var(--text);
+}
+
+/* colors */
+.swatches {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.swatch {
+	position: relative;
+	width: 30px;
+	height: 30px;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: var(--swatch);
+	box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+	cursor: pointer;
+	transition: transform var(--fast) var(--ease-liquid);
+}
+
+.swatch:hover {
+	transform: scale(1.1);
+}
+
+.swatch[aria-pressed="true"],
+.swatch.custom.on {
+	box-shadow:
+		inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+		0 0 0 2px var(--panel),
+		0 0 0 4px var(--text);
+}
+
+/* (the color that comes from your name) */
+.swatch.auto::after {
+	content: "A";
+	position: absolute;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	color: #fff;
+	font: 600 12px/1 "DM Sans", sans-serif;
+	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* (any color at all) */
+.swatch.custom {
+	background: var(--swatch, conic-gradient(#ef4444, #facc15, #22c55e, #0ea5e9, #8b5cf6, #ec4899, #ef4444));
+}
+
+.swatch.custom input {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	padding: 0;
+	border: 0;
+	opacity: 0;
+	cursor: pointer;
+}
+
+.swatch.custom:focus-within {
+	outline: 2px solid var(--aurora);
+	outline-offset: 2px;
+}
+
+/* banners */
+.banner-tiles {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+	gap: 8px;
+}
+
+.banner-tile {
+	aspect-ratio: 3 / 1.3;
+	padding: 0;
+	border: 0;
+	border-radius: 10px;
+	box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+	cursor: pointer;
+	transition: transform var(--fast) var(--ease-liquid);
+}
+
+.banner-tile:hover {
+	transform: scale(1.05);
+}
+
+.banner-tile[aria-pressed="true"] {
+	box-shadow:
+		inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+		0 0 0 2px var(--panel),
+		0 0 0 4px var(--text);
+}
+
+.banner-tile.upload {
+	display: grid;
+	place-items: center;
+	border: 1.5px dashed var(--line);
+	background: var(--glass);
+	box-shadow: none;
+	color: var(--muted);
+}
+
+.banner-tile.upload:hover {
+	color: var(--text);
+}
+
+/* status */
+.status-box {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 6px 4px 4px;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--void) 70%, black);
+	transition:
+		border-color var(--fast) ease,
+		box-shadow var(--fast) ease;
+}
+
+.status-box:focus-within {
+	border-color: color-mix(in srgb, var(--aurora) 70%, transparent);
+	box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.status-box input {
+	flex: 1;
+	min-width: 0;
+	padding: 6px 4px;
+	border: 0;
+	background: none;
+	outline: none;
+}
+
+.status-box input::placeholder {
+	color: var(--faint);
+}
+
+.emoji-btn {
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	border: 0;
+	border-radius: 9px;
+	background: var(--glass);
+	color: var(--muted);
+	font-size: 18px;
+	line-height: 1;
+}
+
+.emoji-btn:hover,
+.emoji-btn[aria-expanded="true"] {
+	background: var(--glass-strong);
+	color: var(--text);
+}
+
+.emoji-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(34px, 1fr));
+	gap: 2px;
+	padding: 6px;
+	border: 1px solid var(--line);
+	border-radius: 14px;
+	background: var(--glass);
+	animation: rise var(--mid) var(--ease-out);
+}
+
+.emoji-pick {
+	display: grid;
+	place-items: center;
+	height: 34px;
+	padding: 0;
+	border: 0;
+	border-radius: 9px;
+	background: none;
+	color: var(--muted);
+	font-size: 19px;
+	line-height: 1;
+}
+
+.emoji-pick:hover {
+	background: var(--glass-strong);
+}
+
+.status-picks {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.status-pick {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 30px;
+	padding: 0 11px 0 9px;
+	border: 1px solid var(--line);
+	border-radius: 15px;
+	background: var(--glass);
+	color: var(--muted);
+	font-size: 12.5px;
+}
+
+.status-pick:hover {
+	background: var(--glass-strong);
+	color: var(--text);
+}
+
+/* fitting a picture */
+.crop-sheet {
+	width: min(420px, calc(100vw - 24px));
+}
+
+.crop-stage {
+	position: relative;
+	width: 100%;
+	aspect-ratio: 1;
+	border-radius: 16px;
+	background: color-mix(in srgb, var(--void) 80%, black);
+	overflow: hidden;
+	cursor: grab;
+	touch-action: none;
+	user-select: none;
+}
+
+.crop-sheet[data-kind="banner"] .crop-stage {
+	aspect-ratio: 3;
+}
+
+.crop-stage.dragging {
+	cursor: grabbing;
+}
+
+.crop-stage img {
+	position: absolute;
+	top: 0;
+	left: 0;
+	max-width: none;
+	transform-origin: 0 0;
+	pointer-events: none;
+}
+
+/* (a round window for pictures; the corners are dimmed, since they won't show) */
+.crop-frame {
+	position: absolute;
+	inset: 0;
+	border-radius: 50%;
+	box-shadow:
+		0 0 0 2px rgba(255, 255, 255, 0.7),
+		0 0 0 999px rgba(5, 3, 12, 0.55);
+	pointer-events: none;
+}
+
+.crop-sheet[data-kind="banner"] .crop-frame {
+	border-radius: 14px;
+	box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.5);
+}
+
+.crop-zoom {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	color: var(--muted);
+}
+
+.crop-zoom .small-ico {
+	width: 15px;
+	height: 15px;
+}
+
+.crop-zoom input {
+	flex: 1;
+	accent-color: var(--aurora);
+}
+
+/* sharing a page from Slow */
+
+.share-card {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 10px 12px;
+	border: 1px solid var(--line);
+	border-radius: 14px;
+	background: var(--glass);
+}
+
+.share-icon {
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 36px;
+	height: 36px;
+	border-radius: 11px;
+	background: var(--accent-soft);
+	color: var(--aurora);
+}
+
+.share-text {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.share-text b,
+.share-text span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.share-text b {
+	font-weight: 600;
+}
+
+.share-text span {
+	color: var(--muted);
+	font-size: 12.5px;
+}
+
+.share-now {
+	flex: none;
+	color: var(--faint);
+	font-size: 12px;
 }
 
 /* people */
@@ -2383,10 +3349,10 @@ button {
 .toast {
 	display: flex;
 	align-items: center;
-	gap: 9px;
+	gap: 10px;
 	max-width: 100%;
-	padding: 8px 14px 8px 8px;
-	border: 1px solid var(--line);
+	padding: 9px 14px 9px 9px;
+	border: 1px solid color-mix(in srgb, var(--aurora) 24%, var(--line));
 	border-radius: 18px;
 	background: color-mix(in srgb, var(--panel) 94%, transparent);
 	box-shadow: 0 14px 34px rgba(0, 0, 0, 0.55);
@@ -2400,6 +3366,40 @@ button {
 
 .toast:not(:has(.avatar)) {
 	padding-left: 14px;
+}
+
+.toast.clickable:hover {
+	border-color: color-mix(in srgb, var(--aurora) 55%, var(--line));
+}
+
+.toast-body {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	min-width: 0;
+}
+
+.toast-title {
+	overflow: hidden;
+	font-weight: 600;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.toast-title + .toast-text {
+	color: var(--muted);
+}
+
+/* Wide (full screen): in the top right corner, out of the way of the conversation. */
+@media (min-width: 640px) {
+	.toasts {
+		top: 68px;
+		right: 16px;
+		bottom: auto;
+		left: auto;
+		width: min(340px, calc(100vw - 32px));
+		align-items: stretch;
+	}
 }
 
 .toast-text {
@@ -2425,4 +3425,180 @@ button {
 	animation-duration: 0.01ms !important;
 	animation-iteration-count: 1 !important;
 	transition-duration: 0.01ms !important;
+}
+
+/* ---------- liquid ---------- */
+
+/* new messages pop in like a drop landing */
+.msg.arrive .bubble {
+	transform-origin: bottom left;
+	animation: bubble-in var(--slow) var(--ease-jelly) both;
+}
+
+.msg.mine.arrive .bubble {
+	transform-origin: bottom right;
+}
+
+@keyframes bubble-in {
+	from {
+		opacity: 0;
+		transform: translateY(10px) scale(0.55, 0.7);
+	}
+	25% {
+		opacity: 1;
+	}
+}
+
+/* reactions bubble up */
+.reaction {
+	animation: pop var(--mid) var(--ease-jelly);
+}
+
+/* ============================================================
+   LIQUID GLASS (../liquid.js and ../liquid.css)
+   ============================================================ */
+
+:root {
+	/* a darker glass for panels with writing on them */
+	--glass-panel:
+		radial-gradient(140% 100% at 20% 0%, color-mix(in srgb, var(--aurora) 8%, transparent), transparent 55%),
+		linear-gradient(160deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0) 45%, rgba(255, 255, 255, 0.015)),
+		color-mix(in srgb, var(--void) 66%, transparent);
+}
+
+/* the open chat: a drop of glass that flows to the one you open */
+.convs {
+	position: relative;
+}
+
+.convs.has-lens > .conv {
+	z-index: 1;
+}
+
+.convs.has-lens > .conv.active {
+	background: none;
+}
+
+.convs > .liquid-lens {
+	border-radius: 14px;
+}
+
+/* drops that follow the pointer over buttons, people and menu choices */
+.side-head,
+.room-actions,
+.online-list {
+	position: relative;
+}
+
+.side-head.has-lens > .icon-btn,
+.room-actions.has-lens > .icon-btn,
+.online-list.has-lens > .person,
+.menu.has-lens > .menu-item,
+.msg-tools.has-lens .tool {
+	position: relative;
+	z-index: 1;
+}
+
+.side-head.has-lens > .icon-btn:hover,
+.room-actions.has-lens > .icon-btn:hover,
+.online-list.has-lens > .person:hover,
+.menu.has-lens > .menu-item:hover,
+.menu.has-lens > .menu-item:focus-visible,
+.msg-tools.has-lens .tool:hover {
+	background: transparent;
+}
+
+.online-list > .liquid-lens {
+	border-radius: 14px;
+}
+
+.menu > .liquid-lens {
+	border-radius: 10px;
+}
+
+.msg-tools > .liquid-lens {
+	border-radius: 9px;
+}
+
+/* glass surfaces: the message box, menus, pop-ups and sheets */
+.composer-row {
+	border-color: rgba(255, 255, 255, 0.12);
+	background: var(--glass-panel);
+	backdrop-filter: blur(16px) saturate(170%);
+	-webkit-backdrop-filter: blur(16px) saturate(170%);
+	box-shadow:
+		var(--liquid-rim),
+		0 12px 32px -14px rgba(0, 0, 0, 0.7);
+}
+
+.composer-row:focus-within {
+	box-shadow:
+		var(--liquid-rim),
+		0 0 0 3px var(--accent-soft),
+		0 12px 32px -14px rgba(0, 0, 0, 0.7);
+}
+
+.menu,
+.msg-tools,
+.toast,
+.cmd-hint,
+.ringing,
+.jump {
+	background: var(--glass-panel);
+	backdrop-filter: blur(18px) saturate(170%);
+	-webkit-backdrop-filter: blur(18px) saturate(170%);
+	box-shadow:
+		var(--liquid-rim),
+		0 18px 44px rgba(0, 0, 0, 0.55);
+}
+
+.sheet {
+	background:
+		radial-gradient(120% 70% at 100% 0%, color-mix(in srgb, var(--nebula) 30%, transparent), transparent 70%),
+		var(--glass-panel);
+	backdrop-filter: blur(26px) saturate(160%);
+	-webkit-backdrop-filter: blur(26px) saturate(160%);
+	box-shadow:
+		var(--liquid-rim),
+		0 30px 70px rgba(0, 0, 0, 0.6);
+}
+
+/* (Chrome and Edge: the glass bends what's behind it at its rim) */
+.liquid-refract .composer-row {
+	backdrop-filter: url(#liquid-lens-wide) blur(16px) saturate(170%);
+}
+
+.liquid-refract .menu,
+.liquid-refract .msg-tools,
+.liquid-refract .toast,
+.liquid-refract .cmd-hint,
+.liquid-refract .ringing,
+.liquid-refract .jump {
+	backdrop-filter: url(#liquid-lens-wide) blur(18px) saturate(170%);
+}
+
+.liquid-refract .sheet {
+	backdrop-filter: url(#liquid-lens-wide) blur(26px) saturate(160%);
+}
+
+/* reactions and call buttons: little glass pills and drops */
+.reaction {
+	box-shadow: var(--liquid-rim);
+}
+
+.reaction.mine {
+	background: var(--liquid-fill);
+}
+
+.round:not(.danger):not(.go) {
+	background: var(--liquid-fill);
+	backdrop-filter: var(--liquid-backdrop);
+	-webkit-backdrop-filter: var(--liquid-backdrop);
+}
+
+.round,
+.send {
+	box-shadow:
+		var(--liquid-rim),
+		0 8px 20px -8px rgba(0, 0, 0, 0.5);
 }

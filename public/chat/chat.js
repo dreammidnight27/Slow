@@ -112,6 +112,10 @@
 		check: '<path d="M5 12.5l4.5 4.5L19 7.5" />',
 		panel: '<rect x="3.5" y="5" width="17" height="14" rx="2.5" /><path d="M14.5 5v14" />',
 		expand: '<path d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5" />',
+		camera: '<path d="M4.5 8.5h3L9 6h6l1.5 2.5h3A1.5 1.5 0 0 1 21 10v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18v-8a1.5 1.5 0 0 1 1.5-1.5Z" /><circle cx="12" cy="13.5" r="3.3" />',
+		upload: '<path d="M12 15V4.5M7.5 9 12 4.5 16.5 9" /><path d="M4.5 14.5v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3" />',
+		smile: '<circle cx="12" cy="12" r="8.5" /><path d="M8.5 14a4 4 0 0 0 7 0" /><circle class="fill" cx="9" cy="10" r="1.1" /><circle class="fill" cx="15" cy="10" r="1.1" />',
+		none: '<circle cx="12" cy="12" r="8" /><path d="M6.5 17.5l11-11" />',
 	};
 	function icon(name) {
 		const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -218,6 +222,18 @@
 			: FIREBASE,
 	);
 	const auth = firebase.auth();
+	// Always the WebSocket connection. After one fails (a network blip), Firebase remembers it and
+	// tries its fallback (long polling) first from then on, which Slow's cross-origin isolation
+	// blocks, so the chat would never connect again. So it isn't allowed to remember.
+	try {
+		const FAILED = "firebase:previous_websocket_failure";
+		localStorage.removeItem(FAILED);
+		const setItem = Storage.prototype.setItem;
+		Storage.prototype.setItem = function (key, value) {
+			if (key === FAILED) return;
+			return setItem.call(this, key, value);
+		};
+	} catch {}
 	const db = firebase.database();
 	if (EMULATOR) {
 		auth.useEmulator("http://127.0.0.1:9099", { disableWarnings: true });
@@ -250,8 +266,8 @@
 	   CONSTANTS
 	   ============================================================ */
 
-	// The owner's name from the Moonplayer chatroom. Only someone signed in to that account
-	// (or using Slow's dev mode) can give out titles.
+	// The owner's name from the Moonplayer chatroom. Only someone signed in to that account can give
+	// out titles and delete other people's messages (dev mode only lets you sign up with the name).
 	const OWNER_NAME = "Dreamid";
 	const RESERVED = new Set(["dreamid", "slow", "admin", "owner", "moderator", "system", "everyone"]);
 	const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
@@ -259,6 +275,38 @@
 	const MAX_TEXT = 500;
 	const GROUP_GAP = 5 * 60_000;
 	const AVATAR_COLORS = ["#8B5CF6", "#6366F1", "#3B82F6", "#0EA5E9", "#A855F7", "#D946EF", "#EC4899", "#7C3AED", "#14B8A6", "#F59E0B"];
+
+	// What a profile can look like. Only these exact choices are used from anyone's profile.
+	const PROFILE_COLORS = ["#b98cff", "#8b5cf6", "#6366f1", "#3b82f6", "#0ea5e9", "#14b8a6", "#22c55e", "#a3e635", "#facc15", "#f97316", "#ef4444", "#ec4899"];
+	const BANNERS = [
+		["color", "Your color"],
+		["nebula", "Nebula"],
+		["aurora", "Aurora"],
+		["midnight", "Midnight"],
+		["sunset", "Sunset"],
+		["ocean", "Ocean"],
+		["forest", "Forest"],
+		["ember", "Ember"],
+		["rose", "Rose"],
+	];
+	const FRAMES = [
+		["none", "None"],
+		["ring", "Ring"],
+		["glow", "Glow"],
+		["aurora", "Aurora"],
+	];
+	const STATUS_PICKS = [
+		["🎮", "Gaming"],
+		["📚", "Studying"],
+		["🎬", "Watching something"],
+		["🎧", "Listening to music"],
+		["💤", "Away"],
+		["🔕", "Busy"],
+	];
+	const STATUS_EMOJI = ["😀", "😎", "🥳", "😴", "🤔", "😭", "🥺", "🤩", "🔥", "✨", "🌙", "⭐", "💜", "👻", "🎃", "🚀", "🎮", "📚", "🎬", "🎧", "💻", "🎨", "☕", "🍕"];
+	const MAX_BIO = 240;
+	const MAX_STATUS = 60;
+	const MAX_PRONOUNS = 24;
 
 	const RANKS = [
 		{ min: 1, name: "Rookie", color: "#9C8FC7" },
@@ -291,6 +339,8 @@
 	const convs = new Map(); // conversation id -> conversation
 	let current = null;
 	let read = {}; // conversation id -> last read message key
+	let drafts = {}; // conversation id -> what you'd started writing there
+	const DRAFTS_KEY = () => `slow.chat.drafts.${ROOM}.${me.key}`;
 	const READ_KEY = () => `slow.chat.read.${ROOM}.${me.key}`;
 
 	/* ============================================================
@@ -382,6 +432,46 @@
 
 	const displayName = (key) => profiles.get(key)?.name || onlineNames.get(key) || xpOf.get(key)?.name || key;
 
+	/* ---------- how someone's profile looks ---------- */
+
+	const BANNER_IDS = new Set(BANNERS.map(([id]) => id));
+	const FRAME_IDS = new Set(FRAMES.map(([id]) => id));
+	const hex6 = (value) => (typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value.toLowerCase() : null);
+	// One line of plain writing (no invisible characters that flip or hide text).
+	const plainText = (value, max) =>
+		typeof value === "string"
+			? value
+					.replace(/[\u0000-\u001f\u007f​-‏‪-‮⁦-⁩]/g, " ")
+					.replace(/\s+/g, " ")
+					.trim()
+					.slice(0, max)
+			: "";
+	// One emoji (joined ones like 👩‍💻 count as one).
+	const oneEmoji = (value) =>
+		typeof value === "string" && value.length <= 16 && /^\p{Extended_Pictographic}/u.test(value) && !/[\s\u0000-\u001f]/.test(value) ? value : "";
+
+	// Someone's profile, keeping only what's allowed in it.
+	function lookFrom(profile) {
+		const p = profile && typeof profile === "object" ? profile : {};
+		const look = {
+			pfp: typeof p.pfp === "string" ? p.pfp : null,
+			color: hex6(p.color),
+			banner: BANNER_IDS.has(p.banner) || p.banner === "picture" ? p.banner : "color",
+			bannerAt: Number(p.bannerAt) || 0,
+			frame: FRAME_IDS.has(p.frame) ? p.frame : "none",
+			pronouns: plainText(p.pronouns, MAX_PRONOUNS),
+			status: plainText(p.status, MAX_STATUS),
+			statusEmoji: oneEmoji(p.statusEmoji),
+			bio: typeof p.bio === "string" ? p.bio.slice(0, MAX_BIO) : "",
+		};
+		if (look.banner === "picture" && !look.bannerAt) look.banner = "color";
+		return look;
+	}
+	const lookOf = (key) => lookFrom(profiles.get(key));
+	// Their color: the one they picked, or the one that comes from their name.
+	const tintOf = (name, look = lookOf(keyOf(name))) => look.color || colorFor(name);
+	const moodOf = (look) => [look.statusEmoji, look.status].filter(Boolean).join(" ");
+
 	// Starts keeping someone's profile, level and last-online time up to date, the first time they show up.
 	function watchPerson(name) {
 		const key = keyOf(name);
@@ -418,9 +508,11 @@
 		return blob;
 	}
 
+	const PICTURE_DATA = /^data:image\/(png|jpe?g|gif|webp);base64,[a-z0-9+/=]+$/i;
+
 	function pictureFor(src) {
 		if (typeof src !== "string") return null;
-		if (/^data:image\/(png|jpe?g|gif|webp);base64,[a-z0-9+/=]+$/i.test(src)) return src;
+		if (PICTURE_DATA.test(src)) return src;
 		if (!/^https?:\/\/\S+$/i.test(src)) return null;
 		const known = remotePics.get(src);
 		if (known === undefined) {
@@ -436,22 +528,26 @@
 		return known === "loading" || known === "failed" ? null : known;
 	}
 
-	function avatar(name, size, { dot = true } = {}) {
+	// (mood: their status emoji in a little bubble on the picture)
+	function avatar(name, size, { dot = true, mood = false } = {}) {
 		const el = h("span", { class: "avatar", "data-person": keyOf(name), "aria-hidden": "true" });
 		el.dataset.name = String(name ?? "");
 		if (!dot) el.dataset.nodot = "";
+		if (mood) el.dataset.mood = "";
 		el.style.setProperty("--size", `${size}px`);
 		watchPerson(name);
 		paintAvatar(el);
 		return el;
 	}
 
-	function paintAvatar(el) {
+	// (look: how to draw it, when it isn't their saved profile, like the preview while editing yours)
+	function paintAvatar(el, look = lookOf(el.dataset.person)) {
 		const key = el.dataset.person;
 		const name = el.dataset.name;
-		const picture = pictureFor(profiles.get(key)?.pfp);
+		const picture = pictureFor(look.pfp);
 		el.replaceChildren();
-		el.style.setProperty("--tint", colorFor(name));
+		el.style.setProperty("--tint", tintOf(name, look));
+		el.dataset.frame = look.frame;
 		el.classList.toggle("has-pic", Boolean(picture));
 		if (picture) {
 			const img = h("img", { alt: "", decoding: "async", draggable: "false" });
@@ -465,6 +561,45 @@
 			el.append(initialsFor(name));
 		}
 		if (!("nodot" in el.dataset) && online.has(key)) el.append(h("span", { class: "dot" }));
+		if ("mood" in el.dataset && look.statusEmoji) el.append(h("span", { class: "mood", text: look.statusEmoji }));
+	}
+
+	// A name written in the color they picked.
+	function paintName(el) {
+		const color = lookOf(el.dataset.person).color;
+		el.classList.toggle("colored", Boolean(color));
+		if (color) el.style.setProperty("--name", color);
+		else el.style.removeProperty("--name");
+	}
+
+	// Banner pictures are kept apart from profiles (they're bigger), and only loaded when someone
+	// opens that profile.
+	const bannerPics = new Map(); // person key -> { at, src } (src: the picture, "loading" or "failed")
+	function bannerPicture(key, at) {
+		const known = bannerPics.get(key);
+		if (known?.at === at) return known.src === "loading" || known.src === "failed" ? null : known.src;
+		if (!usableKey(key)) return null;
+		bannerPics.set(key, { at, src: "loading" });
+		R(`banners/${key}`)
+			.once("value")
+			.then((snap) => {
+				const pic = snap.val()?.pic;
+				bannerPics.set(key, { at, src: typeof pic === "string" && PICTURE_DATA.test(pic) ? pic : "failed" });
+			})
+			.catch(() => bannerPics.set(key, { at, src: "failed" }))
+			.finally(() => {
+				if (viewing && keyOf(viewing) === key) renderProfile(viewing);
+				if (draft && key === me?.key) renderPreview();
+			});
+		return null;
+	}
+
+	function paintBanner(el, look, tint, picture = null) {
+		el.style.setProperty("--tint", tint);
+		el.dataset.banner = look.banner === "picture" ? (picture ? "picture" : "color") : look.banner;
+		// (the picture is checked to be a picture's data: nothing else can get into the style)
+		if (picture && PICTURE_DATA.test(picture)) el.style.setProperty("--banner-pic", `url("${picture}")`);
+		else el.style.removeProperty("--banner-pic");
 	}
 
 	function levelForXp(xp) {
@@ -518,11 +653,16 @@
 			repaintQueue.clear();
 			for (const key of keys) {
 				for (const el of document.querySelectorAll(`.avatar[data-person="${CSS.escape(key)}"]`)) paintAvatar(el);
+				for (const el of document.querySelectorAll(`.msg-name[data-person="${CSS.escape(key)}"]`)) paintName(el);
 				for (const el of document.querySelectorAll(`.lv[data-level="${CSS.escape(key)}"]`)) el.replaceWith(levelBadge(displayName(key)));
 			}
-			if (me && keys.includes(me.key)) renderMe();
+			if (me && keys.includes(me.key)) {
+				renderMe();
+				if (draft) renderPreview();
+			}
 			if (viewing && keys.includes(keyOf(viewing))) renderProfile(viewing);
 			if (keys.some((key) => online.has(key))) renderOnline();
+			if (current?.kind === "dm" && keys.includes(keyOf(current.peer))) renderRoomHead();
 		});
 	}
 
@@ -548,10 +688,14 @@
 	const authSubmit = $("auth-submit");
 	let signUpMode = false;
 
+	// (a drop of glass slides to the chosen one)
+	const authLens = window.Liquid?.lens(document.querySelector(".auth-tabs"));
+
 	function setAuthMode(signUp) {
 		signUpMode = signUp;
 		$("tab-login").setAttribute("aria-selected", String(!signUp));
 		$("tab-signup").setAttribute("aria-selected", String(signUp));
+		authLens?.to(signUp ? $("tab-signup") : $("tab-login"));
 		$("name-field").hidden = !signUp;
 		$("auth-forgot").hidden = signUp;
 		authSubmit.textContent = signUp ? "Create account" : "Log in";
@@ -679,6 +823,8 @@
 		me = { uid: user.uid, name, key: keyOf(name) };
 		joinedAt = Date.now();
 		read = store.get(READ_KEY(), {});
+		drafts = store.get(DRAFTS_KEY(), {});
+		if (!drafts || typeof drafts !== "object") drafts = {};
 		rememberSignedIn(true);
 
 		// An account from the Moonplayer chatroom keeps its name in the list of taken names.
@@ -732,6 +878,8 @@
 
 	function endSession() {
 		if (!me) return;
+		saveDraft();
+		drafts = {};
 		if (call) endCall(true);
 		if (ringingCall) declineCall();
 		if (group) leaveGroupCall();
@@ -800,6 +948,13 @@
 	   ============================================================ */
 
 	const convsEl = $("convs");
+	// Liquid glass (../liquid.js): a drop of glass marks the open chat and flows to the next one,
+	// and others follow the pointer over the header's buttons and the people online.
+	const Liquid = window.Liquid;
+	const convLens = Liquid?.lens(convsEl);
+	const onlineLens = Liquid?.lens($("online-list"), { hover: ".person" });
+	Liquid?.lens(document.querySelector(".side-head"), { hover: ".side-head > .icon-btn", className: "small" });
+	Liquid?.lens(document.querySelector(".room-actions"), { hover: ".room-actions > .icon-btn", className: "small" });
 	const wide = () => window.innerWidth >= 640;
 
 	function addConv(conv) {
@@ -980,13 +1135,40 @@
 
 	function alertAbout(conv) {
 		const { name, text } = conv.last;
-		const where = conv.kind === "group" ? `${name} in ${conv.title}` : name;
 		playSound("receive");
 		if (!prefs.notify) return;
-		const snippet = text.length > 90 ? `${text.slice(0, 90)}…` : text;
-		const dockOpen = slow ? slow.visible?.() : !document.hidden;
-		if (dockOpen) toast(`${where}: ${snippet}`, { person: name, onclick: () => openConv(conv.id) });
-		else slow?.notify?.(`${where}: ${snippet}`, [{ label: "Open", run: () => slow.open(conv.id) }], 8000);
+		const title = conv.kind === "group" ? conv.title : conv.kind === "global" ? `${name} mentioned you` : name;
+		const message = (conv.kind === "group" ? `${name}: ${text}` : text).slice(0, 200);
+		const chatOpen = slow ? slow.visible?.() : !document.hidden;
+		if (chatOpen) {
+			toast(message, { person: name, title, onclick: () => openConv(conv.id) });
+			return;
+		}
+		// (one card per conversation: more messages add up on it, "3 new")
+		slow?.notify?.({
+			tone: "chat",
+			key: `chat:${conv.id}`,
+			count: true,
+			title,
+			message,
+			avatar: { src: pictureFor(profiles.get(keyOf(name))?.pfp), text: initialsFor(name), color: tintOf(name) },
+			// (answer right there in the notification, without opening the chat)
+			reply: { placeholder: `Reply to ${conv.kind === "dm" ? name : conv.title}`, send: (text) => quickReply(conv.id, text) },
+			onClick: () => slow.open(conv.id),
+			timeout: 9000,
+		});
+	}
+
+	// A reply typed into a notification: sent, and the chat counts as read.
+	async function quickReply(id, text) {
+		const conv = convs.get(id);
+		text = String(text ?? "").trim();
+		if (!conv || !me || !text) return false;
+		await sendMessage(conv, text);
+		markRead(conv);
+		renderConvs();
+		updateBadge();
+		return true;
 	}
 
 	function convTime(conv) {
@@ -1015,8 +1197,11 @@
 			.filter((c) => !query || c.title.toLowerCase().includes(query))
 			.sort((a, b) => (a.kind === "global" ? -1 : b.kind === "global" ? 1 : convTime(b) - convTime(a)));
 		convsEl.replaceChildren(
+			...(convLens ? [convLens.el] : []),
 			...list.map((conv) => {
 				const unread = isUnread(conv);
+				// (what you'd started writing in another chat shows instead of its last message)
+				const draft = conv !== current && typeof drafts[conv.id] === "string" ? drafts[conv.id].replace(/\s+/g, " ").trim() : "";
 				return h(
 					"button",
 					{
@@ -1030,15 +1215,34 @@
 						"span",
 						{ class: "conv-text" },
 						h("span", { class: "conv-top" }, h("span", { class: "conv-name", text: conv.title }), h("span", { class: "conv-time", text: shortAgo(convTime(conv)) })),
-						h("span", { class: "conv-last", text: previewText(conv) }),
+						draft
+							? h("span", { class: "conv-last" }, h("span", { class: "draft-tag", text: "Draft: " }), draft)
+							: h("span", { class: "conv-last", text: previewText(conv) }),
 					),
 					unread && h("span", { class: conv.mention ? "badge mention" : "badge", text: conv.mention ? "@" : "" }),
 				);
 			}),
 		);
 		if (!list.length) convsEl.append(h("p", { class: "empty", text: query ? "No chats match that." : "" }));
+		convLens?.to(convsEl.querySelector(".conv.active"));
 	}
 	$("find").addEventListener("input", renderConvs);
+	// Enter opens the first chat that matches; Escape clears the search.
+	$("find").addEventListener("keydown", (event) => {
+		if (event.key === "Enter") {
+			const first = convsEl.querySelector(".conv");
+			if (!first) return;
+			event.preventDefault();
+			$("find").value = "";
+			openConv(first.dataset.conv);
+			renderConvs();
+		} else if (event.key === "Escape" && $("find").value) {
+			event.preventDefault();
+			event.stopPropagation();
+			$("find").value = "";
+			renderConvs();
+		}
+	});
 	setInterval(() => me && renderConvs(), 60_000); // keeps "5m" times current
 
 	function renderOnline() {
@@ -1046,14 +1250,16 @@
 		const keys = [...online].filter((k) => k !== me.key);
 		$("online-count").textContent = keys.length ? String(keys.length) : "";
 		$("online-list").replaceChildren(
-			...keys.slice(0, 40).map((key) =>
-				h(
+			...(onlineLens ? [onlineLens.el] : []),
+			...keys.slice(0, 40).map((key) => {
+				const mood = moodOf(lookOf(key));
+				return h(
 					"button",
-					{ class: "person", type: "button", title: displayName(key), onclick: () => openProfile(displayName(key)) },
-					avatar(displayName(key), 40),
+					{ class: "person", type: "button", title: mood ? `${displayName(key)} · ${mood}` : displayName(key), onclick: () => openProfile(displayName(key)) },
+					avatar(displayName(key), 40, { mood: true }),
 					h("span", { class: "person-name", text: displayName(key) }),
-				),
-			),
+				);
+			}),
 		);
 		$("online-list").closest(".online").classList.toggle("none", !keys.length);
 	}
@@ -1062,7 +1268,8 @@
 		if (!me) return;
 		$("me-name").textContent = me.name;
 		const { level } = levelForXp(statsFor(me.name).xp);
-		$("me-sub").textContent = `Lv ${level} · ${rankFor(level).name}`;
+		// (your status, when you've set one)
+		$("me-sub").textContent = moodOf(lookOf(me.key)) || `Lv ${level} · ${rankFor(level).name}`;
 		$("me-avatar").replaceChildren(avatar(me.name, 34));
 	}
 
@@ -1103,6 +1310,7 @@
 			if (focus) $("text").focus();
 			return;
 		}
+		saveDraft();
 		leaveRoom();
 		current = conv;
 		store.set(`slow.chat.last.${ROOM}.${me.key}`, id);
@@ -1110,6 +1318,8 @@
 		renderRoomHead();
 		renderConvs();
 		$("text").placeholder = conv.kind === "global" ? "Message everyone" : `Message ${conv.title}`;
+		// (each chat keeps what you'd started writing in it)
+		$("text").value = drafts[conv.id] || "";
 		updateComposer();
 
 		const token = ++loadToken;
@@ -1170,6 +1380,7 @@
 			const isNew = !rendered.has(snap.key);
 			placeMessage(snap.key, snap.val());
 			if (!isNew) return;
+			rendered.get(snap.key)?.li.classList.add("arrive");
 			oldestKey ??= snap.key;
 			const m = snap.val() || {};
 			const mine = keyOf(m.name) === me.key;
@@ -1380,7 +1591,11 @@
 
 		const body = h("div", { class: "msg-body" });
 		const meta = h("div", { class: "meta" });
-		if (!mine) meta.append(h("button", { class: "msg-name", type: "button", text: name, onclick: () => openProfile(name) }), levelBadge(name));
+		if (!mine) {
+			const who = h("button", { class: "msg-name", type: "button", "data-person": keyOf(name), text: name, onclick: () => openProfile(name) });
+			paintName(who);
+			meta.append(who, levelBadge(name));
+		}
 		const tag = !mine && titleTag(name);
 		if (tag) meta.append(tag);
 		meta.append(h("time", { datetime: new Date(time).toISOString(), title: new Date(time).toLocaleString(), text: clockFormat.format(time) }));
@@ -1460,6 +1675,7 @@
 	}
 
 	const tools = $("msg-tools");
+	window.Liquid?.lens(tools, { hover: ".tool", className: "small" });
 	let toolsKey = null;
 	$("msg-react").append(
 		...REACTIONS.map((emoji) =>
@@ -1471,7 +1687,13 @@
 		if (!li?.dataset.key || li.dataset.key === "~") return;
 		toolsKey = li.dataset.key;
 		const mine = li.classList.contains("mine");
-		$("tool-delete").hidden = !(mine || canModerate());
+		// (the owner can delete anyone's message: the button says so, with the owner's mark)
+		const asOwner = !mine && canModerate();
+		const del = $("tool-delete");
+		del.hidden = !(mine || asOwner);
+		del.classList.toggle("as-owner", asOwner);
+		del.title = asOwner ? `Delete ${li.dataset.name}'s message (owner)` : "Delete";
+		del.setAttribute("aria-label", asOwner ? `Delete ${li.dataset.name}'s message, as the chat's owner` : "Delete message");
 		tools.hidden = false;
 		tools.classList.toggle("left", mine);
 		li.append(tools);
@@ -1532,10 +1754,27 @@
 	$("tool-delete").addEventListener("click", async () => {
 		const key = toolsKey;
 		const conv = current;
+		const item = rendered.get(key);
 		hideTools();
-		if (!key || !conv) return;
-		const ok = await confirmSheet({ title: "Delete this message?", text: "It's deleted for everyone.", yes: "Delete" });
-		if (ok) conv.ref.child(key).remove().catch(() => toast("Couldn't delete it."));
+		if (!key || !conv || !item) return;
+		const author = String(item.m.name ?? "");
+		const theirs = keyOf(author) !== me.key;
+		const said = String(item.m.text ?? "").replace(/\s+/g, " ").trim();
+		const quote = said.length > 90 ? `${said.slice(0, 90)}…` : said;
+		const ok = await confirmSheet(
+			theirs
+				? {
+						title: `Delete ${author}'s message?`,
+						text: `“${quote}” will be gone for everyone. You're deleting it as the chat's owner.`,
+						yes: "Delete it",
+					}
+				: { title: "Delete this message?", text: "It's deleted for everyone.", yes: "Delete" },
+		);
+		if (!ok) return;
+		conv.ref
+			.child(key)
+			.remove()
+			.catch(() => toast(theirs ? "Couldn't delete it. Only the owner's account can delete other people's messages." : "Couldn't delete it."));
 	});
 
 	let replyTo = null;
@@ -1568,12 +1807,22 @@
 		else if (conv.kind === "group") {
 			const n = Object.keys(conv.members || {}).length;
 			sub = n === 1 ? "1 member" : `${n} members`;
-		} else {
-			const key = keyOf(conv.peer);
-			sub = online.has(key) ? "Online" : seenAt.get(key) ? longAgo(seenAt.get(key)) : "";
 		}
-		$("room-sub").textContent = sub;
-		$("room-sub").classList.toggle("live", conv.kind === "dm" && online.has(keyOf(conv.peer)));
+		if (conv.kind === "dm" && connected) {
+			// Online (or when they last were), and their status.
+			const key = keyOf(conv.peer);
+			const live = online.has(key);
+			const mood = moodOf(lookOf(key));
+			const presence = live ? "Online" : seenAt.get(key) ? longAgo(seenAt.get(key)) : "";
+			$("room-sub").replaceChildren(
+				...(presence ? [h("span", { class: live ? "live" : null, text: presence })] : []),
+				...(presence && mood ? [" · "] : []),
+				...(mood ? [mood] : []),
+			);
+		} else {
+			$("room-sub").textContent = sub;
+		}
+		$("room-sub").classList.remove("live");
 		$("btn-voice").hidden = false;
 		$("btn-video").hidden = false;
 		const groupish = conv.kind !== "dm";
@@ -1656,44 +1905,166 @@
 	const textEl = $("text");
 	const COMMANDS = [
 		{ cmd: "/profile", about: "Edit your profile" },
+		{ cmd: "/status", about: "[emoji] [what you're up to] (nothing clears it)" },
 		{ cmd: "/leaderboard", about: "See who's on top" },
 		{ cmd: "/title give", about: "<title> [#color] <username>", owner: true },
 		{ cmd: "/title clear", about: "<username>", owner: true },
 	];
 
-	const canModerate = () => Boolean(me && (me.name === OWNER_NAME || slow?.isDev?.()));
+	// Deleting other people's messages and giving titles: only the owner's account (the database's
+	// rules check the same thing, so nobody else can, even from the browser's developer tools).
+	const canModerate = () => Boolean(me && me.name === OWNER_NAME);
+
+	// The message box grows with what you write, up to a point, and then scrolls.
+	function fitComposer() {
+		textEl.style.height = "auto";
+		const full = textEl.scrollHeight;
+		// (while the chat is hidden nothing has a size, so it's measured again once it shows)
+		if (!full) {
+			textEl.style.height = "";
+			return;
+		}
+		textEl.style.height = `${Math.min(full, 140)}px`;
+		textEl.style.overflowY = full > 140 ? "auto" : "hidden";
+	}
+	// (again when its width changes: when the chat shows, or goes from full screen to the side)
+	let composerWidth = 0;
+	new ResizeObserver(() => {
+		if (textEl.clientWidth === composerWidth) return;
+		composerWidth = textEl.clientWidth;
+		fitComposer();
+	}).observe(textEl);
 
 	function updateComposer() {
-		textEl.style.height = "auto";
-		textEl.style.height = `${Math.min(textEl.scrollHeight, 140)}px`;
+		fitComposer();
 		const length = textEl.value.length;
 		$("send").disabled = !textEl.value.trim();
 		$("count").hidden = length < MAX_TEXT - 100;
 		$("count").textContent = `${length}/${MAX_TEXT}`;
-		// Commands, while typing one.
+		refreshHints();
+	}
+
+	// What you've started writing stays with that chat (even after closing Slow), and comes back
+	// when you open it again.
+	let draftTimer = 0;
+	function saveDraft() {
+		clearTimeout(draftTimer);
+		if (!current || !me) return;
+		const text = textEl.value;
+		if (text.trim()) drafts[current.id] = text.slice(0, MAX_TEXT);
+		else delete drafts[current.id];
+		store.set(DRAFTS_KEY(), drafts);
+	}
+	function saveDraftSoon() {
+		clearTimeout(draftTimer);
+		draftTimer = setTimeout(saveDraft, 400);
+	}
+
+	/* ---------- suggestions above the message box: commands, and people to @mention ---------- */
+
+	let hints = []; // { label, about, person, pick() }
+	let hintsKind = "";
+	let hintAt = 0; // the highlighted one (↑ ↓ to move, Tab or Enter to use it)
+	let hintsDismissed = false; // (Escape hides them until you type again)
+
+	function refreshHints() {
 		const typed = textEl.value;
-		const hint = $("cmd-hint");
-		const options = typed.startsWith("/") && !typed.includes("\n")
-			? COMMANDS.filter((c) => (!c.owner || canModerate()) && (c.cmd.startsWith(typed.trim()) || typed.startsWith(`${c.cmd} `)))
-			: [];
-		hint.hidden = !options.length;
-		hint.replaceChildren(
-			...options.map((c) =>
+		hints = [];
+		if (hintsDismissed) hintsKind = "";
+		else if (typed.startsWith("/") && !typed.includes("\n")) {
+			hintsKind = "command";
+			hints = COMMANDS.filter((c) => (!c.owner || canModerate()) && (c.cmd.startsWith(typed.trim()) || typed.startsWith(`${c.cmd} `))).map((c) => ({
+				label: c.cmd,
+				about: c.about,
+				pick: () => putText(`${c.cmd} `),
+			}));
+		} else {
+			hintsKind = "mention";
+			hints = mentionHints();
+		}
+		renderHints();
+	}
+
+	function renderHints() {
+		const list = $("cmd-hint");
+		list.hidden = !hints.length;
+		hintAt = Math.min(hintAt, Math.max(0, hints.length - 1));
+		list.replaceChildren(
+			...hints.map((o, i) =>
 				h(
 					"li",
-					{ role: "option" },
-					h("button", { type: "button", onclick: () => {
-						textEl.value = `${c.cmd} `;
-						textEl.focus();
-						updateComposer();
-					} }, h("b", { text: c.cmd }), h("span", { text: c.about })),
+					{ role: "option", "aria-selected": String(i === hintAt) },
+					h(
+						"button",
+						{
+							type: "button",
+							tabindex: "-1",
+							class: i === hintAt ? "on" : null,
+							// (so the message box keeps the keyboard)
+							onmousedown: (event) => event.preventDefault(),
+							onclick: () => o.pick(),
+						},
+						o.person ? avatar(o.person, 22, { dot: false }) : null,
+						h("b", { text: o.label }),
+						o.about ? h("span", { text: o.about }) : null,
+					),
 				),
 			),
 		);
 	}
 
-	textEl.addEventListener("input", () => {
+	function putText(value, caret = value.length) {
+		textEl.value = value;
+		textEl.focus();
+		textEl.setSelectionRange(caret, caret);
 		updateComposer();
+		saveDraftSoon();
+	}
+
+	// "@jo" just before the cursor: who it could be. People in this chat come first (in a DM,
+	// the other person; in a group, its members), then whoever wrote here lately and who's online.
+	function mentionHints() {
+		const caret = textEl.selectionStart;
+		if (!current || !me || caret !== textEl.selectionEnd) return [];
+		const before = textEl.value.slice(0, caret);
+		const match = before.match(/(?:^|\s)@([\p{L}\p{N}-]{0,24})$/u);
+		if (!match) return [];
+		const typed = match[1].toLowerCase();
+		const names = new Map(); // key -> their name
+		const add = (name) => {
+			const n = String(name ?? "").trim();
+			const key = keyOf(n);
+			if (n && key !== me.key && usableKey(key) && !names.has(key)) names.set(key, n);
+		};
+		if (current.kind === "dm") add(current.peer);
+		if (current.kind === "group") for (const member of Object.values(current.members || {})) add(member?.name);
+		for (const { m } of [...rendered.values()].reverse()) add(m?.name);
+		for (const key of online) add(displayName(key));
+		const all = [...names.values()];
+		const found = [...all.filter((n) => n.toLowerCase().startsWith(typed)), ...all.filter((n) => typed && !n.toLowerCase().startsWith(typed) && n.toLowerCase().includes(typed))];
+		const start = caret - match[1].length - 1; // (where the @ is)
+		return found.slice(0, 6).map((name) => ({
+			label: name,
+			about: online.has(keyOf(name)) ? "Online" : "",
+			person: name,
+			pick: () => {
+				const value = `${textEl.value.slice(0, start)}@${name} ${textEl.value.slice(caret)}`;
+				putText(value, start + name.length + 2);
+			},
+		}));
+	}
+
+	// (moving the cursor changes what it's next to)
+	textEl.addEventListener("click", refreshHints);
+	textEl.addEventListener("keyup", (event) => {
+		if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) refreshHints();
+	});
+
+	textEl.addEventListener("input", () => {
+		hintsDismissed = false;
+		hintAt = 0;
+		updateComposer();
+		saveDraftSoon();
 		if (!current || !me || !usableKey(me.key) || !textEl.value.trim()) return;
 		const now = Date.now();
 		if (now - typingSentAt < 2500) return;
@@ -1704,6 +2075,22 @@
 	});
 
 	textEl.addEventListener("keydown", (event) => {
+		// Choosing from the suggestions with the keyboard.
+		if (hints.length && !event.isComposing) {
+			const typed = textEl.value.trim();
+			const wholeCommand = hintsKind === "command" && COMMANDS.some((c) => typed === c.cmd || textEl.value.startsWith(`${c.cmd} `));
+			if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+				event.preventDefault();
+				hintAt = (hintAt + (event.key === "ArrowDown" ? 1 : -1) + hints.length) % hints.length;
+				renderHints();
+				return;
+			}
+			if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey && !wholeCommand)) {
+				event.preventDefault();
+				hints[hintAt]?.pick();
+				return;
+			}
+		}
 		if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
 			event.preventDefault();
 			$("composer").requestSubmit();
@@ -1724,19 +2111,26 @@
 		if (text.startsWith("/") && runCommand(text)) {
 			textEl.value = "";
 			updateComposer();
+			saveDraft();
 			return;
 		}
-		const conv = current;
-		const message = { name: me.name, text: text.slice(0, MAX_TEXT), ts: TIMESTAMP, uid: me.uid };
-		if (replyTo) message.replyTo = replyTo;
-		conv.ref.push(message).catch((err) => toast(`Didn't send: ${err.message}`));
+		sendMessage(current, text, { quote: replyTo }).catch((err) => toast(`Didn't send: ${err.message}`));
 		textEl.value = "";
 		cancelReply();
 		updateComposer();
+		saveDraft();
 		clearMyTyping();
+		stuck = true;
+	});
+
+	// Sends a message to a chat: from the message box, or a reply typed into one of Slow's
+	// notifications.
+	function sendMessage(conv, text, { quote = null } = {}) {
+		const message = { name: me.name, text: text.slice(0, MAX_TEXT), ts: TIMESTAMP, uid: me.uid };
+		if (quote) message.replyTo = quote;
+		const sent = conv.ref.push(message);
 		playSound("send");
 		awardXp(5, "message", 8000);
-		stuck = true;
 		if (conv.kind === "dm") {
 			// (the Moonplayer chatroom finds new messages this way)
 			if (validSegment(conv.peer)) R(`pings/${conv.peer}`).set({ from: me.name, text: text.slice(0, 120), ts: Date.now() }).catch(() => {});
@@ -1744,12 +2138,17 @@
 			const peerKey = keyOf(conv.peer);
 			if (usableKey(peerKey) && usableKey(me.key)) R(`userDms/${peerKey}/${me.key}`).update({ name: me.name, ts: TIMESTAMP }).catch(() => {});
 		}
-	});
+		return sent;
+	}
 
 	function runCommand(text) {
 		const lower = text.toLowerCase();
 		if (lower === "/profile") {
 			openEdit();
+			return true;
+		}
+		if (lower === "/status" || lower.startsWith("/status ")) {
+			setStatus(text.slice(7).trim());
 			return true;
 		}
 		if (lower === "/leaderboard") {
@@ -1867,18 +2266,91 @@
 		watchPerson(viewing);
 		renderProfile(viewing);
 		hideTools();
-		if (!profileSheet.open) profileSheet.showModal();
+		if (!profileSheet.open) {
+			showStats(false, { instant: true });
+			profileSheet.showModal();
+		}
 	}
-	profileSheet.addEventListener("close", () => (viewing = null));
+	profileSheet.addEventListener("close", () => {
+		viewing = null;
+		showStats(false, { instant: true });
+	});
+
+	/* ---------- their stats: tucked behind a button, and springing open like a drop ---------- */
+
+	const statsDrawer = $("pf-stats");
+	const statsCard = $("pf-level-card");
+	const statsBtn = $("pf-stats-btn");
+	let statsOpen = false;
+	let statsSpring = null; // 0: closed, 1: open (it overshoots a little, like water)
+
+	const statsMotion = {
+		step: (dt) => statsSpring.step(dt),
+		render() {
+			paintStats(statsSpring.value);
+			if (!statsSpring.still) return true;
+			settleStats();
+			return false;
+		},
+	};
+
+	// The drawer opens to the card's height, and the card swells up out of the Stats button.
+	function paintStats(v) {
+		const t = Math.min(1, Math.max(0, v));
+		statsDrawer.style.height = `${Math.max(0, v) * statsDrawer.firstElementChild.offsetHeight}px`;
+		statsCard.style.opacity = String(Math.min(1, t * 1.6));
+		statsCard.style.transform = `translateY(${(1 - t) * 12}px) scale(${0.86 + 0.14 * t}, ${Math.max(0.4, 0.5 + 0.5 * v)})`;
+	}
+
+	function settleStats() {
+		statsDrawer.style.height = "";
+		statsCard.style.opacity = "";
+		statsCard.style.transform = "";
+		statsDrawer.hidden = !statsOpen;
+	}
+
+	function showStats(open, { instant = false } = {}) {
+		const ring = $("pf-ring");
+		const wasHidden = statsDrawer.hidden;
+		statsOpen = open;
+		statsBtn.setAttribute("aria-expanded", String(open));
+		if (!open) ring.style.setProperty("--p", 0);
+		const Liquid = window.Liquid;
+		if (instant || !Liquid || Liquid.calm()) {
+			statsSpring?.set(open ? 1 : 0);
+			settleStats();
+			if (open) ring.style.setProperty("--p", ring.dataset.p || 0);
+			return;
+		}
+		statsSpring ||= new Liquid.Spring(0, { stiffness: 300, damping: 21 });
+		if (open && wasHidden) {
+			statsDrawer.hidden = false;
+			statsSpring.set(0);
+			paintStats(0);
+		}
+		statsSpring.target = open ? 1 : 0;
+		Liquid.animate(statsMotion);
+		// (the ring fills up as it opens)
+		if (open) requestAnimationFrame(() => statsOpen && ring.style.setProperty("--p", ring.dataset.p || 0));
+	}
+	statsBtn.addEventListener("click", () => showStats(!statsOpen));
 
 	function renderProfile(name) {
 		const key = keyOf(name);
 		const profile = profiles.get(key);
 		const isMe = key === me.key;
 		const shown = profile?.name || name;
+		const look = lookFrom(profile);
+		const tint = tintOf(shown, look);
+		profileSheet.style.setProperty("--pf", tint);
 		$("pf-avatar").replaceChildren(avatar(shown, 84));
-		$("pf-banner").style.setProperty("--tint", colorFor(shown));
+		paintBanner($("pf-banner"), look, tint, look.banner === "picture" ? bannerPicture(key, look.bannerAt) : null);
 		$("pf-name").textContent = shown;
+		$("pf-pronouns").textContent = look.pronouns;
+		$("pf-pronouns").hidden = !look.pronouns;
+		$("pf-mood-emoji").textContent = look.statusEmoji;
+		$("pf-mood-text").textContent = look.status;
+		$("pf-mood").hidden = !moodOf(look);
 		$("pf-status").textContent = online.has(key) ? "Online" : seenAt.get(key) ? longAgo(seenAt.get(key)) : "";
 		$("pf-status").classList.toggle("live", online.has(key));
 		$("pf-tags").replaceChildren(...[levelBadge(shown), titleTag(shown)].filter(Boolean));
@@ -1886,15 +2358,20 @@
 		const stats = statsFor(shown);
 		const { level, into, need } = levelForXp(stats.xp);
 		const rank = rankFor(level);
+		// (a ring around their level fills up as they get closer to the next one)
+		const progress = Math.round((into / need) * 100);
+		$("pf-level-card").style.setProperty("--rank", rank.color);
 		$("pf-rank").textContent = rank.name;
-		$("pf-rank").style.setProperty("--rank", rank.color);
-		$("pf-level").textContent = `Level ${level}`;
-		$("pf-xp").style.width = `${Math.round((into / need) * 100)}%`;
-		$("pf-xp-text").textContent = `${into} / ${need} XP to level ${level + 1}`;
+		$("pf-level").textContent = level;
+		$("pf-ring").dataset.p = progress;
+		if (statsOpen) $("pf-ring").style.setProperty("--p", progress);
+		$("pf-ring").setAttribute("aria-label", `Level ${level}, ${progress}% of the way to level ${level + 1}`);
+		$("pf-xp-text").textContent = `${into.toLocaleString()} / ${need.toLocaleString()} XP`;
+		$("pf-xp-text").title = `${(need - into).toLocaleString()} XP to level ${level + 1}`;
 		$("pf-count").textContent = Number(stats.messageCount || 0).toLocaleString();
 		$("pf-since").textContent = stats.firstSeenAt ? new Date(stats.firstSeenAt).toLocaleDateString(undefined, { month: "short", year: "numeric" }) : "—";
 
-		const bio = typeof profile?.bio === "string" ? profile.bio : "";
+		const bio = look.bio;
 		$("pf-bio").textContent = bio || (isMe ? "You haven't written a bio yet." : "No bio yet.");
 		$("pf-bio").classList.toggle("empty", !bio);
 		for (const id of ["pf-voice", "pf-video", "pf-message"]) $(id).hidden = isMe;
@@ -1919,52 +2396,335 @@
 	/* ---------- your profile ---------- */
 
 	const editSheet = $("edit");
-	let pendingPic; // undefined: unchanged, null: removed, string: new
-
-	function openEdit() {
-		if (!me) return;
-		const profile = profiles.get(me.key);
-		pendingPic = undefined;
-		$("edit-error").hidden = true;
-		$("edit-file").value = "";
-		$("edit-url").value = "";
-		$("edit-bio").value = typeof profile?.bio === "string" ? profile.bio : "";
-		$("edit-count").textContent = `${$("edit-bio").value.length}/240`;
-		previewPic(pictureFor(profile?.pfp));
-		editSheet.showModal();
-		$("edit-bio").focus();
-	}
-
-	function previewPic(src) {
-		const el = h("span", { class: "avatar", "aria-hidden": "true" });
-		el.style.setProperty("--size", "76px");
-		el.style.setProperty("--tint", colorFor(me.name));
-		if (src) {
-			el.classList.add("has-pic");
-			el.append(h("img", { alt: "", src }));
-		} else {
-			el.append(initialsFor(me.name));
-		}
-		$("edit-avatar").replaceChildren(el);
-	}
+	let draft = null; // the look you're making, while you edit it
+	let pendingPic; // your picture: undefined: unchanged, null: removed, string: new
+	let pendingBanner; // a new banner picture, when you've chosen one
 
 	function editError(text) {
 		$("edit-error").textContent = text;
 		$("edit-error").hidden = !text;
 	}
 
-	// Pictures are made into a small square and kept with your profile, so they never break.
-	function squarePicture(blob, size = 128) {
+	function openEdit() {
+		if (!me) return;
+		draft = lookOf(me.key);
+		pendingPic = undefined;
+		pendingBanner = undefined;
+		editError("");
+		$("edit-url").value = "";
+		$("edit-url-row").hidden = true;
+		toggleEmojiGrid(false);
+		$("edit-status").value = draft.status;
+		$("edit-pronouns").value = draft.pronouns;
+		$("edit-bio").value = draft.bio;
+		renderPreview();
+		editSheet.showModal();
+	}
+	editSheet.addEventListener("close", () => (draft = null));
+
+	// Your profile as it'll look, from the choices and the boxes as they are now.
+	function draftLook() {
+		return {
+			...draft,
+			pfp: pendingPic === undefined ? draft.pfp : pendingPic,
+			pronouns: plainText($("edit-pronouns").value, MAX_PRONOUNS),
+			status: plainText($("edit-status").value, MAX_STATUS),
+			bio: $("edit-bio").value.slice(0, MAX_BIO),
+		};
+	}
+
+	function draftBanner() {
+		if (draft.banner !== "picture") return null;
+		return typeof pendingBanner === "string" ? pendingBanner : bannerPicture(me.key, draft.bannerAt);
+	}
+
+	// Your picture drawn the way it would look (not your saved one).
+	function draftFace(look, size) {
+		const el = h("span", { class: "avatar", "aria-hidden": "true" });
+		el.dataset.name = me.name;
+		el.dataset.nodot = "";
+		el.style.setProperty("--size", `${size}px`);
+		paintAvatar(el, look);
+		return el;
+	}
+
+	function renderPreview() {
+		if (!draft || !me) return;
+		const look = draftLook();
+		const tint = tintOf(me.name, look);
+		editSheet.style.setProperty("--pf", tint);
+
+		// the profile card
+		paintBanner($("ed-banner"), look, tint, draftBanner());
+		$("ed-avatar").replaceChildren(draftFace(look, 84), h("span", { class: "avatar-hint", "aria-hidden": "true" }, icon("camera")));
+		$("ed-name").textContent = me.name;
+		$("ed-pronouns").textContent = look.pronouns;
+		$("ed-pronouns").hidden = !look.pronouns;
+		const { level } = levelForXp(statsFor(me.name).xp);
+		$("ed-level").textContent = `Level ${level} · ${rankFor(level).name}`;
+		$("ed-mood-emoji").textContent = look.statusEmoji;
+		$("ed-mood-text").textContent = look.status;
+		$("ed-mood").hidden = !moodOf(look);
+		$("ed-bio").textContent = look.bio.trim() || "Your bio shows here.";
+		$("ed-bio").classList.toggle("empty", !look.bio.trim());
+
+		// and in a chat
+		$("ed-msg-avatar").replaceChildren(draftFace(look, 34));
+		$("ed-msg-name").textContent = me.name;
+		$("ed-msg-name").classList.toggle("colored", Boolean(look.color));
+		if (look.color) $("ed-msg-name").style.setProperty("--name", look.color);
+		else $("ed-msg-name").style.removeProperty("--name");
+
+		$("edit-remove").hidden = !look.pfp;
+		$("edit-count").textContent = `${$("edit-bio").value.length}/${MAX_BIO}`;
+		$("edit-emoji").replaceChildren(look.statusEmoji || icon("smile"));
+
+		// the choices, drawn with your picture and color
+		for (const btn of $("edit-frames").children) {
+			btn.setAttribute("aria-pressed", String(btn.dataset.value === look.frame));
+			btn.querySelector(".frame-face").replaceChildren(draftFace({ ...look, frame: btn.dataset.value }, 36));
+		}
+		for (const el of $("edit-colors").querySelectorAll("[data-value]")) el.setAttribute("aria-pressed", String(el.dataset.value === (look.color || "auto")));
+		$("edit-color-auto").style.setProperty("--swatch", colorFor(me.name));
+		const custom = look.color && !PROFILE_COLORS.includes(look.color) ? look.color : null;
+		$("edit-color-custom").classList.toggle("on", Boolean(custom));
+		if (custom) $("edit-color-custom").style.setProperty("--swatch", custom);
+		else $("edit-color-custom").style.removeProperty("--swatch");
+		$("edit-color-input").value = look.color || colorFor(me.name).toLowerCase();
+		for (const btn of $("edit-banners").querySelectorAll("[data-value]")) {
+			btn.style.setProperty("--tint", tint);
+			btn.setAttribute("aria-pressed", String(btn.dataset.value === look.banner));
+		}
+		// (your banner picture, new or saved, stays a choice)
+		const picTile = $("edit-banner-pic");
+		picTile.hidden = !(typeof pendingBanner === "string" || draft.bannerAt);
+		const tilePic = typeof pendingBanner === "string" ? pendingBanner : draft.bannerAt ? bannerPicture(me.key, draft.bannerAt) : null;
+		paintBanner(picTile, { banner: "picture" }, tint, tilePic);
+	}
+
+	function pick(change) {
+		if (!draft) return;
+		Object.assign(draft, change);
+		renderPreview();
+	}
+
+	// The choices (made once: renderPreview shows which one is picked).
+	for (const [id, label] of FRAMES) {
+		$("edit-frames").append(
+			h(
+				"button",
+				{ class: "frame-tile", type: "button", "data-value": id, "aria-pressed": "false", onclick: () => pick({ frame: id }) },
+				h("span", { class: "frame-face" }),
+				h("span", { class: "frame-label", text: label }),
+			),
+		);
+	}
+
+	{
+		const input = h("input", { id: "edit-color-input", type: "color", "aria-label": "Any color" });
+		input.addEventListener("input", () => pick({ color: hex6(input.value) }));
+		$("edit-colors").append(
+			h("button", { id: "edit-color-auto", class: "swatch auto", type: "button", "data-value": "auto", title: "From your name", "aria-label": "Color from your name", onclick: () => pick({ color: null }) }),
+			...PROFILE_COLORS.map((color) => {
+				const el = h("button", { class: "swatch", type: "button", "data-value": color, title: color, "aria-label": `Color ${color}`, onclick: () => pick({ color }) });
+				el.style.setProperty("--swatch", color);
+				return el;
+			}),
+			h("label", { id: "edit-color-custom", class: "swatch custom", title: "Any color" }, input),
+		);
+	}
+
+	for (const [id, label] of BANNERS) {
+		$("edit-banners").append(
+			h("button", { class: "banner banner-tile", type: "button", "data-value": id, "data-banner": id, title: label, "aria-label": `${label} banner`, "aria-pressed": "false", onclick: () => pick({ banner: id }) }),
+		);
+	}
+	$("edit-banners").append(
+		h("button", { id: "edit-banner-pic", class: "banner banner-tile", type: "button", "data-value": "picture", title: "Your picture", "aria-label": "Your banner picture", "aria-pressed": "false", hidden: true, onclick: () => pick({ banner: "picture" }) }),
+		h("button", { class: "banner-tile upload", type: "button", title: "Upload a picture", "aria-label": "Upload a banner picture", onclick: () => $("edit-banner-file").click() }, icon("upload")),
+	);
+
+	// Status: an emoji and a few words.
+	function toggleEmojiGrid(open = $("edit-emoji-grid").hidden) {
+		$("edit-emoji-grid").hidden = !open;
+		$("edit-emoji").setAttribute("aria-expanded", String(open));
+	}
+	$("edit-emoji").addEventListener("click", () => toggleEmojiGrid());
+	$("edit-emoji-grid").append(
+		h("button", { class: "emoji-pick", type: "button", title: "No emoji", "aria-label": "No emoji", onclick: () => (pick({ statusEmoji: "" }), toggleEmojiGrid(false)) }, icon("none")),
+		...STATUS_EMOJI.map((emoji) => h("button", { class: "emoji-pick", type: "button", text: emoji, onclick: () => (pick({ statusEmoji: emoji }), toggleEmojiGrid(false)) })),
+	);
+	$("edit-status-picks").append(
+		...STATUS_PICKS.map(([emoji, text]) =>
+			h(
+				"button",
+				{
+					class: "status-pick",
+					type: "button",
+					onclick: () => {
+						$("edit-status").value = text;
+						pick({ statusEmoji: emoji });
+					},
+				},
+				h("span", { text: emoji }),
+				h("span", { text }),
+			),
+		),
+	);
+	$("edit-status-clear").addEventListener("click", () => {
+		$("edit-status").value = "";
+		pick({ statusEmoji: "" });
+		$("edit-status").focus();
+	});
+	for (const id of ["edit-status", "edit-pronouns", "edit-bio"]) $(id).addEventListener("input", renderPreview);
+
+	// Pictures: from a file or a link, then moved and zoomed to fit.
+	async function choosePicture(blob, kind) {
+		editError("");
+		if (!blob.type.startsWith("image/")) return editError("That file isn't a picture.");
+		try {
+			const pic = await cropPicture(blob, kind);
+			if (!pic || !draft) return;
+			if (kind === "banner") {
+				pendingBanner = pic;
+				draft.banner = "picture";
+			} else {
+				pendingPic = pic;
+			}
+			renderPreview();
+		} catch (err) {
+			editError(err.message);
+		}
+	}
+
+	for (const [id, kind] of [
+		["edit-file", "avatar"],
+		["edit-banner-file", "banner"],
+	]) {
+		$(id).addEventListener("change", () => {
+			const file = $(id).files?.[0];
+			$(id).value = ""; // (so picking the same file again still works)
+			if (file) choosePicture(file, kind);
+		});
+	}
+	$("ed-avatar").addEventListener("click", () => $("edit-file").click());
+	$("ed-banner").addEventListener("click", () => $("edit-banner-file").click());
+
+	$("edit-link").addEventListener("click", () => {
+		$("edit-url-row").hidden = !$("edit-url-row").hidden;
+		if (!$("edit-url-row").hidden) $("edit-url").focus();
+	});
+
+	async function pictureFromLink() {
+		const url = $("edit-url").value.trim();
+		if (!url) return;
+		if (!/^https?:\/\/\S+$/i.test(url)) return editError("Picture links start with https://");
+		editError("");
+		$("edit-url-go").disabled = true;
+		try {
+			const blob = await fetchImage(url);
+			$("edit-url").value = "";
+			$("edit-url-row").hidden = true;
+			await choosePicture(blob, "avatar");
+		} catch (err) {
+			editError(`Couldn't use that picture: ${err.message}`);
+		} finally {
+			$("edit-url-go").disabled = false;
+		}
+	}
+	$("edit-url-go").addEventListener("click", pictureFromLink);
+	$("edit-url").addEventListener("keydown", (event) => {
+		if (event.key !== "Enter") return;
+		event.preventDefault();
+		pictureFromLink();
+	});
+
+	$("edit-remove").addEventListener("click", () => {
+		pendingPic = null;
+		editError("");
+		renderPreview();
+	});
+
+	$("edit-save").addEventListener("click", async () => {
+		if (!me || !draft) return;
+		if (!usableKey(me.key)) return editError("Your username has characters that can't be saved.");
+		const look = draftLook();
+		const old = lookOf(me.key);
+		const payload = { name: me.name, bio: look.bio.trim(), updated: Date.now() };
+		const pfp = pendingPic === undefined ? profiles.get(me.key)?.pfp : pendingPic;
+		if (typeof pfp === "string" && pfp) payload.pfp = pfp;
+		if (look.color) payload.color = look.color;
+		if (look.frame !== "none") payload.frame = look.frame;
+		if (look.pronouns) payload.pronouns = look.pronouns;
+		if (look.status) payload.status = look.status;
+		if (look.statusEmoji) payload.statusEmoji = look.statusEmoji;
+		let banner = look.banner;
+		$("edit-save").disabled = true;
+		try {
+			if (banner === "picture") {
+				if (typeof pendingBanner === "string") {
+					const at = Date.now();
+					// (with your name: the database checks that it's yours)
+					await R(`banners/${me.key}`).set({ pic: pendingBanner, at, name: me.name });
+					bannerPics.set(me.key, { at, src: pendingBanner });
+					payload.bannerAt = at;
+				} else if (old.banner === "picture") {
+					payload.bannerAt = old.bannerAt;
+				} else {
+					banner = "color";
+				}
+			}
+			if (banner !== "color") payload.banner = banner;
+			await R(`profiles/${me.key}`).set(payload);
+			// (a banner picture you've stopped using isn't kept)
+			if (old.banner === "picture" && banner !== "picture") R(`banners/${me.key}`).remove().catch(() => {});
+			editSheet.close();
+			toast("Profile saved.");
+		} catch (err) {
+			editError(`Couldn't save: ${err.message}`);
+		} finally {
+			$("edit-save").disabled = false;
+		}
+	});
+
+	// "/status 🎮 Playing Roblox" sets your status without opening your profile; "/status" clears it.
+	async function setStatus(raw) {
+		if (!me || !usableKey(me.key)) return;
+		const match = raw.match(/^(\p{Extended_Pictographic}(?:️|‍\p{Extended_Pictographic}|[\u{1F3FB}-\u{1F3FF}])*)\s*(.*)$/su);
+		const emoji = oneEmoji(match?.[1] || "");
+		const text = plainText(match ? match[2] : raw, MAX_STATUS);
+		try {
+			await R(`profiles/${me.key}`).update({ name: me.name, status: text || null, statusEmoji: emoji || null, updated: Date.now() });
+			toast(emoji || text ? `Status: ${[emoji, text].filter(Boolean).join(" ")}` : "Status cleared.");
+		} catch (err) {
+			toast(`Couldn't set your status: ${err.message}`);
+		}
+	}
+
+	/* ---------- fitting a picture: moving and zooming it ---------- */
+
+	const cropSheet = $("crop");
+	const cropStage = $("crop-stage");
+	const cropImg = $("crop-img");
+	const cropZoom = $("crop-zoom");
+	let crop = null; // { kind, url, img, iw, ih, base, zoom, x, y, done }
+	let cropDrag = null;
+
+	// Shows the picture to move and zoom, and gives back the part you chose (or null).
+	function cropPicture(blob, kind) {
 		return new Promise((resolve, reject) => {
+			finishCrop(null);
 			const url = URL.createObjectURL(blob);
 			const img = new Image();
 			img.onload = () => {
-				const canvas = document.createElement("canvas");
-				canvas.width = canvas.height = size;
-				const side = Math.min(img.naturalWidth, img.naturalHeight);
-				canvas.getContext("2d").drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, size, size);
-				URL.revokeObjectURL(url);
-				resolve(canvas.toDataURL("image/jpeg", 0.8));
+				crop = { kind, url, img, iw: img.naturalWidth, ih: img.naturalHeight, base: 1, zoom: 1, x: 0, y: 0, done: resolve };
+				cropImg.src = url;
+				cropImg.style.width = `${crop.iw}px`;
+				cropImg.style.height = `${crop.ih}px`;
+				cropSheet.dataset.kind = kind;
+				$("crop-title").textContent = kind === "banner" ? "Fit your banner" : "Fit your picture";
+				cropSheet.showModal();
+				fitCrop();
 			};
 			img.onerror = () => {
 				URL.revokeObjectURL(url);
@@ -1974,64 +2734,182 @@
 		});
 	}
 
-	$("edit-file").addEventListener("change", async () => {
-		const file = $("edit-file").files?.[0];
-		if (!file) return;
-		editError("");
-		if (!file.type.startsWith("image/")) return editError("That file isn't a picture.");
-		try {
-			pendingPic = await squarePicture(file);
-			$("edit-url").value = "";
-			previewPic(pendingPic);
-		} catch (err) {
-			editError(err.message);
-		}
+	// (sizes as laid out: the sheet may still be springing open)
+	const stageSize = () => [cropStage.clientWidth, cropStage.clientHeight];
+
+	function fitCrop() {
+		const [W, H] = stageSize();
+		crop.base = Math.max(W / crop.iw, H / crop.ih);
+		crop.zoom = 1;
+		crop.x = (W - crop.iw * crop.base) / 2;
+		crop.y = (H - crop.ih * crop.base) / 2;
+		cropZoom.value = "1";
+		placeCrop();
+	}
+
+	// (the picture always covers the frame)
+	function placeCrop() {
+		const [W, H] = stageSize();
+		const s = crop.base * crop.zoom;
+		crop.x = Math.min(0, Math.max(W - crop.iw * s, crop.x));
+		crop.y = Math.min(0, Math.max(H - crop.ih * s, crop.y));
+		cropImg.style.transform = `translate(${crop.x}px, ${crop.y}px) scale(${s})`;
+	}
+
+	// Zooms around a point in the frame (its middle, unless given).
+	function zoomCrop(zoom, cx, cy) {
+		if (!crop) return;
+		const [W, H] = stageSize();
+		const before = crop.zoom;
+		crop.zoom = Math.min(4, Math.max(1, zoom));
+		const ratio = crop.zoom / before;
+		cx ??= W / 2;
+		cy ??= H / 2;
+		crop.x = cx - (cx - crop.x) * ratio;
+		crop.y = cy - (cy - crop.y) * ratio;
+		cropZoom.value = String(crop.zoom);
+		placeCrop();
+	}
+
+	cropZoom.addEventListener("input", () => zoomCrop(Number(cropZoom.value)));
+	cropStage.addEventListener(
+		"wheel",
+		(event) => {
+			if (!crop) return;
+			event.preventDefault();
+			const box = cropStage.getBoundingClientRect();
+			const scale = box.width / cropStage.clientWidth || 1;
+			zoomCrop(crop.zoom * Math.exp(-event.deltaY * 0.0015), (event.clientX - box.left) / scale, (event.clientY - box.top) / scale);
+		},
+		{ passive: false },
+	);
+	cropStage.addEventListener("pointerdown", (event) => {
+		if (!crop || event.button !== 0) return;
+		cropStage.setPointerCapture(event.pointerId);
+		cropDrag = { id: event.pointerId, x: event.clientX, y: event.clientY, ox: crop.x, oy: crop.y };
+		cropStage.classList.add("dragging");
+	});
+	cropStage.addEventListener("pointermove", (event) => {
+		if (!crop || cropDrag?.id !== event.pointerId) return;
+		crop.x = cropDrag.ox + event.clientX - cropDrag.x;
+		crop.y = cropDrag.oy + event.clientY - cropDrag.y;
+		placeCrop();
+	});
+	for (const type of ["pointerup", "pointercancel"]) {
+		cropStage.addEventListener(type, (event) => {
+			if (cropDrag?.id !== event.pointerId) return;
+			cropDrag = null;
+			cropStage.classList.remove("dragging");
+		});
+	}
+	// Arrow keys move it, + and - zoom.
+	cropStage.addEventListener("keydown", (event) => {
+		if (!crop) return;
+		const step = event.shiftKey ? 24 : 6;
+		const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+		if (moves[event.key]) {
+			crop.x += moves[event.key][0];
+			crop.y += moves[event.key][1];
+			placeCrop();
+		} else if (event.key === "+" || event.key === "=") zoomCrop(crop.zoom * 1.1);
+		else if (event.key === "-") zoomCrop(crop.zoom / 1.1);
+		else return;
+		event.preventDefault();
 	});
 
-	$("edit-url").addEventListener("change", async () => {
-		const url = $("edit-url").value.trim();
-		if (!url) return;
-		if (!/^https?:\/\/\S+$/i.test(url)) return editError("Picture links start with https://");
-		editError("");
-		$("edit-save").disabled = true;
+	$("crop-use").addEventListener("click", () => {
+		if (!crop) return;
+		const [W, H] = stageSize();
+		const s = crop.base * crop.zoom;
+		const [outW, outH] = crop.kind === "banner" ? [600, 200] : [160, 160];
 		try {
-			pendingPic = await squarePicture(await fetchImage(url));
-			$("edit-file").value = "";
-			previewPic(pendingPic);
-		} catch (err) {
-			editError(`Couldn't use that picture: ${err.message}`);
-		} finally {
-			$("edit-save").disabled = false;
+			const canvas = document.createElement("canvas");
+			canvas.width = outW;
+			canvas.height = outH;
+			const ctx = canvas.getContext("2d");
+			ctx.fillStyle = "#120c22"; // (under see-through pictures)
+			ctx.fillRect(0, 0, outW, outH);
+			ctx.imageSmoothingQuality = "high";
+			ctx.drawImage(crop.img, -crop.x / s, -crop.y / s, W / s, H / s, 0, 0, outW, outH);
+			finishCrop(canvas.toDataURL("image/jpeg", crop.kind === "banner" ? 0.74 : 0.84));
+		} catch {
+			finishCrop(null);
+			editError("Couldn't use that picture.");
 		}
 	});
+	cropSheet.addEventListener("close", () => finishCrop(null));
 
-	$("edit-remove").addEventListener("click", () => {
-		pendingPic = null;
-		$("edit-file").value = "";
-		$("edit-url").value = "";
-		editError("");
-		previewPic(null);
-	});
+	function finishCrop(result) {
+		if (!crop) return;
+		const { url, done } = crop;
+		crop = null;
+		cropDrag = null;
+		cropStage.classList.remove("dragging");
+		URL.revokeObjectURL(url);
+		cropImg.removeAttribute("src");
+		if (cropSheet.open) cropSheet.close();
+		done(result);
+	}
 
-	$("edit-bio").addEventListener("input", () => ($("edit-count").textContent = `${$("edit-bio").value.length}/240`));
+	/* ---------- sharing the page you're on in Slow ---------- */
 
-	$("edit-save").addEventListener("click", async () => {
-		if (!me) return;
-		if (!usableKey(me.key)) return editError("Your username has characters that can't be saved.");
-		const old = profiles.get(me.key);
-		const pfp = pendingPic === undefined ? old?.pfp : pendingPic;
-		const payload = { name: me.name, bio: $("edit-bio").value.trim().slice(0, 240), updated: Date.now() };
-		if (pfp) payload.pfp = pfp;
-		$("edit-save").disabled = true;
+	const shareSheet = $("share");
+	let shareLink = "";
+
+	function openShare(url, title) {
+		let host = "";
 		try {
-			await R(`profiles/${me.key}`).set(payload);
-			editSheet.close();
-			toast("Profile saved.");
-		} catch (err) {
-			editError(`Couldn't save: ${err.message}`);
-		} finally {
-			$("edit-save").disabled = false;
+			const parsed = new URL(url);
+			if (!/^https?:$/.test(parsed.protocol)) return;
+			host = parsed.hostname.replace(/^www\./, "");
+		} catch {
+			return;
 		}
+		shareLink = url;
+		$("share-page").textContent = title && title !== host ? title : host;
+		$("share-host").textContent = host;
+		$("share-find").value = "";
+		renderShare();
+		if (!shareSheet.open) shareSheet.showModal();
+		$("share-find").focus();
+	}
+
+	// Your chats, the one that's open first, then the newest.
+	function renderShare() {
+		const query = $("share-find").value.trim().toLowerCase();
+		const list = [...convs.values()]
+			.filter((c) => !query || c.title.toLowerCase().includes(query))
+			.sort((a, b) => (a === current ? -1 : b === current ? 1 : convTime(b) - convTime(a)));
+		$("share-list").replaceChildren(
+			...list.map((conv) =>
+				h(
+					"button",
+					{ class: "person-row", type: "button", onclick: () => shareTo(conv.id) },
+					convAvatar(conv, 32),
+					h("span", { class: "person-row-name", text: conv.title }),
+					conv === current ? h("span", { class: "share-now", text: "Open now" }) : null,
+				),
+			),
+		);
+		if (!list.length) $("share-list").append(h("p", { class: "empty", text: "No chats match that." }));
+	}
+
+	// The chat opens with the link in its message box (after anything you'd started writing), to send with Enter.
+	function shareTo(id) {
+		const link = shareLink;
+		shareSheet.close();
+		openConv(id);
+		const before = textEl.value.trimEnd();
+		putText(before ? `${before} ${link}` : link);
+	}
+
+	$("share-find").addEventListener("input", renderShare);
+	$("share-find").addEventListener("keydown", (event) => {
+		if (event.key !== "Enter") return;
+		const first = $("share-list").querySelector("button");
+		if (!first) return;
+		event.preventDefault();
+		first.click();
 	});
 
 	/* ---------- finding people ---------- */
@@ -2289,6 +3167,7 @@
 	   ============================================================ */
 
 	const menu = $("menu");
+	const menuLens = window.Liquid?.lens(menu, { hover: ".menu-item" });
 	let menuButton = null;
 
 	function openMenu(button, items) {
@@ -2296,6 +3175,7 @@
 		menuButton = button;
 		button.setAttribute("aria-expanded", "true");
 		menu.replaceChildren(
+			...(menuLens ? [menuLens.el] : []),
 			...items.map((item) => {
 				if (item.separator) return h("div", { class: "menu-sep", role: "separator" });
 				return h(
@@ -2317,6 +3197,7 @@
 			}),
 		);
 		menu.hidden = false;
+		menuLens?.to(null, { instant: true });
 		// Below the button, or above it when there's no room.
 		const box = button.getBoundingClientRect();
 		const { width, height } = menu.getBoundingClientRect();
@@ -2362,9 +3243,14 @@
 		]);
 	});
 
-	function toast(text, { person = null, onclick = null, sticky = false } = {}) {
+	function toast(text, { person = null, title = null, onclick = null, sticky = false } = {}) {
 		const stack = $("toasts");
-		const el = h("button", { class: "toast", type: "button" }, person ? avatar(person, 28, { dot: false }) : null, h("span", { class: "toast-text", text }));
+		const el = h(
+			"button",
+			{ class: `toast${onclick ? " clickable" : ""}`, type: "button" },
+			person ? avatar(person, title ? 34 : 28, { dot: false }) : null,
+			h("span", { class: "toast-body" }, title && h("span", { class: "toast-title", text: title }), h("span", { class: "toast-text", text })),
+		);
 		const dismiss = () => {
 			el.classList.add("leaving");
 			setTimeout(() => el.remove(), 250);
@@ -2945,6 +3831,7 @@
 	}
 
 	window.addEventListener("pagehide", () => {
+		saveDraft();
 		if (call) endCall(true);
 		if (group) leaveGroupCall();
 		clearMyTyping();
@@ -2955,26 +3842,43 @@
 	   ============================================================ */
 
 	document.addEventListener("keydown", (event) => {
+		const mod = event.ctrlKey || event.metaKey;
 		// Slow's Alt shortcuts work in here too (Alt+C closes the chat).
-		if (event.altKey && !event.ctrlKey && !event.metaKey && slow) {
+		if (event.altKey && !mod && slow) {
 			if (event.code === "KeyC") {
 				event.preventDefault();
 				slow.toggle?.();
 				return;
 			}
-			if (/^(KeyT|KeyW|KeyL|Digit[1-8])$/.test(event.code)) {
+			if (/^(KeyT|KeyW|KeyL|KeyK|Digit[1-8])$/.test(event.code)) {
 				try {
 					if (window.parent.__slowKey?.(event.code, event.shiftKey)) event.preventDefault();
 				} catch {}
 				return;
 			}
 		}
+		// Ctrl+K: Slow's search, from in here too.
+		if (mod && !event.altKey && !event.shiftKey && event.code === "KeyK" && slow) {
+			try {
+				if (window.parent.__slowKey?.("KeyK", false)) event.preventDefault();
+			} catch {}
+			return;
+		}
+		// Reloading (F5, Ctrl+R) reloads just the chat, not all of Slow and its tabs.
+		// (Ctrl+Shift+R and Shift+F5 still reload everything)
+		if (slow && !event.shiftKey && !event.altKey && ((event.key === "F5" && !mod) || (mod && event.code === "KeyR"))) {
+			event.preventDefault();
+			saveDraft();
+			location.reload();
+			return;
+		}
 		if (event.key !== "Escape" || document.querySelector("dialog[open]")) return;
 		if (!menu.hidden) return closeMenu();
 		if (!callEl.hidden) return minimizeCall();
+		// (suggestions showing: Escape just puts them away)
 		if (!$("cmd-hint").hidden) {
-			textEl.value = "";
-			return updateComposer();
+			hintsDismissed = true;
+			return refreshHints();
 		}
 		if (replyTo) return cancelReply();
 		if (!wide() && shell.classList.contains("show-room") && !textEl.value) return shell.classList.remove("show-room");
@@ -3008,6 +3912,7 @@
 		if (wide()) shell.classList.add("show-room");
 	});
 
+
 	// What Slow's page calls.
 	window.__chat = {
 		// The panel opened.
@@ -3019,6 +3924,36 @@
 		},
 		openConv(id) {
 			if (convs.has(id)) openConv(id);
+		},
+		// Opened with the chat button: straight to the newest chat with something new for you
+		// (unless the one that's open has something new too).
+		openUnread() {
+			if (!me) return false;
+			const waiting = [...convs.values()].filter((c) => isUnread(c) && (c.kind !== "global" || c.mention)).sort((a, b) => convTime(b) - convTime(a));
+			if (!waiting.length || waiting.includes(current)) return false;
+			openConv(waiting[0].id);
+			return true;
+		},
+		// Your chats, for Slow's search (Ctrl+K).
+		chats() {
+			if (!me) return [];
+			return [...convs.values()]
+				.sort((a, b) => (a.kind === "global" ? -1 : b.kind === "global" ? 1 : convTime(b) - convTime(a)))
+				.map((c) => ({
+					id: c.id,
+					kind: c.kind,
+					title: c.title,
+					unread: isUnread(c) && (c.kind !== "global" || c.mention),
+					preview: previewText(c),
+					avatar: c.kind === "dm" ? { src: pictureFor(profiles.get(keyOf(c.peer))?.pfp), text: initialsFor(c.peer), color: tintOf(c.peer) } : null,
+				}));
+		},
+		reply: quickReply,
+		// Sharing the page you're on: pick a chat, and its link is ready to send there.
+		share(link) {
+			if (!me) return false;
+			openShare(String(link?.url || ""), String(link?.title || ""));
+			return true;
 		},
 		modeChanged: renderMode,
 		signedIn: () => Boolean(me),

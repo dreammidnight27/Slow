@@ -351,6 +351,9 @@ const BROWSING_SCRIPT = `<script src="${new URL("browsing.js", self.location.hre
 const CLOUD_SKIN_SCRIPT = `<script src="${new URL("cloud-skin.js", self.location.href).href}"></script>`;
 const isCloudPage = (url) =>
 	/^(churchofmoses\.b-cdn\.net|t9os\.space)$/.test(url.hostname) && url.pathname.endsWith("/launcher.html");
+// ...and, on Aether (the movies button), Slow's look for it (aether-skin.js)...
+const AETHER_SKIN_SCRIPT = `<script src="${new URL("aether-skin.js", self.location.href).href}"></script>`;
+const isAetherPage = (url) => /(^|\.)aether\.st$/.test(url.hostname);
 // ...and, on YouTube only, the script that opens its videos in the embedded player (see above).
 const YOUTUBE_SCRIPT = `<script src="${new URL("youtube.js", self.location.href).href}"></script>`;
 
@@ -431,7 +434,7 @@ scramjet.addEventListener("handleResponse", (event) => {
 	if (!injected) return;
 
 	const youtube = /(^|\.)youtube\.com$/.test(event.url.hostname) ? YOUTUBE_SCRIPT : "";
-	const skin = isCloudPage(event.url) ? CLOUD_SKIN_SCRIPT : "";
+	const skin = isCloudPage(event.url) ? CLOUD_SKIN_SCRIPT : isAetherPage(event.url) ? AETHER_SKIN_SCRIPT : "";
 	const ours = injected[0] + TAB_VOLUME_SCRIPT + ADBLOCK_SCRIPT + ENGLISH_SCRIPT + BROWSING_SCRIPT + youtube + skin;
 	const firstScript = html.search(/<script[\s>]/i);
 

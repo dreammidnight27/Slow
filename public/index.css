@@ -1,12 +1,17 @@
 @import url("https://fonts.googleapis.com/css2?family=Unbounded:wght@300;500&family=DM+Sans:wght@400;500&family=Cormorant+Garamond:ital,wght@1,500;1,600&display=swap");
 
 :root {
-	/* Motion: one smooth, decelerating curve and a few shared speeds, used everywhere */
-	--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-	--ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-	--dur-fast: 140ms; /* hovers and presses */
-	--dur-mid: 220ms; /* menus, switches, small things moving */
-	--dur-slow: 380ms; /* panels and page changes */
+	/* Motion: liquid. Things spring into place, overshooting a little and settling like water,
+	   at a few shared speeds, used everywhere. (The springs are drawn just below; browsers that
+	   can't draw them get a simpler overshoot.) */
+	--ease-liquid: cubic-bezier(0.34, 1.56, 0.64, 1); /* most things: a soft spring */
+	--ease-jelly: cubic-bezier(0.34, 1.8, 0.5, 1); /* small things: bouncier */
+	--ease-out: var(--ease-liquid);
+	--ease-in-out: cubic-bezier(0.65, 0, 0.35, 1); /* things leaving: smooth, no bounce */
+	--dur-fast: 180ms; /* hovers and presses */
+	--dur-mid: 400ms; /* menus, switches, small things moving */
+	--dur-slow: 640ms; /* panels and page changes */
+	--dur-exit: 220ms; /* things going away (some code waits exactly this long) */
 
 	--void: #07050f;
 	--nebula: #4a2c8f;
@@ -28,6 +33,14 @@
 	--glass: rgba(238, 240, 255, 0.07);
 	--glass-strong: rgba(238, 240, 255, 0.16);
 	--line: rgba(238, 240, 255, 0.16);
+}
+
+/* real springs: overshoot, a wobble back, and settle */
+@supports (transition-timing-function: linear(0, 1)) {
+	:root {
+		--ease-liquid: linear(0, 0.0231, 0.085, 0.1752, 0.284, 0.4029, 0.5246, 0.6431, 0.7537, 0.8532, 0.9393, 1.0108, 1.0676, 1.11, 1.139, 1.1561, 1.1628, 1.1609, 1.1522, 1.1385, 1.1214, 1.1023, 1.0825, 1.063, 1.0445, 1.0278, 1.0132, 1.0009, 0.9911, 0.9836, 0.9783, 0.9751, 0.9736, 0.9736, 0.9747, 0.9768, 0.9795, 0.9825, 0.9857, 0.9889, 0.992, 0.9948, 0.9973, 0.9994, 1.0011, 1.0024, 1.0033, 1.004, 1.0043, 1.0043, 1.0042, 1.0039, 1.0035, 1.003, 1.0025, 1.0019, 1);
+		--ease-jelly: linear(0, 0.0328, 0.1211, 0.249, 0.4013, 0.5637, 0.7242, 0.8729, 1.0024, 1.1081, 1.1876, 1.2407, 1.2688, 1.2747, 1.262, 1.235, 1.1981, 1.1553, 1.1104, 1.0668, 1.0269, 0.9925, 0.965, 0.9447, 0.9316, 0.9252, 0.9248, 0.9292, 0.9373, 0.9479, 0.9599, 0.9722, 0.9841, 0.9948, 1.0038, 1.011, 1.0162, 1.0193, 1.0207, 1.0205, 1.0191, 1.0167, 1.0136, 1.0103, 1.0069, 1.0037, 1.0009, 0.9985, 0.9966, 0.9953, 0.9946, 0.9943, 0.9944, 0.9949, 0.9956, 0.9964, 0.9974, 0.9983, 0.9992, 0.9999, 1.0005, 1.001, 1.0013, 1.0015, 1);
+	}
 }
 
 * {
@@ -508,40 +521,6 @@ body {
 	color: var(--starlight);
 }
 
-/* ---------- error toast ---------- */
-
-#toast {
-	position: fixed;
-	bottom: 20px;
-	left: 50%;
-	z-index: 10;
-	max-width: min(520px, 92vw);
-	padding: 12px 18px;
-	transform: translateX(-50%);
-	border: 1px solid rgba(255, 140, 140, 0.5);
-	border-radius: 12px;
-	background: rgba(40, 12, 36, 0.92);
-	cursor: pointer;
-}
-
-#sj-error {
-	margin: 0;
-	font-size: 14px;
-	color: #ff9d9d;
-	white-space: pre-wrap;
-}
-
-#sj-error-code {
-	margin: 6px 0 0;
-	font-size: 12px;
-	color: var(--starlight);
-	white-space: pre-wrap;
-}
-
-#sj-error-code:empty {
-	display: none;
-}
-
 /* ============================================================
    MOTION
    ============================================================ */
@@ -559,7 +538,7 @@ body {
 @keyframes tab-in {
 	from {
 		opacity: 0;
-		transform: translateY(4px);
+		transform: translateY(8px) scale(0.6, 1.25);
 	}
 }
 
@@ -569,17 +548,16 @@ body {
 		flex-basis: 0;
 		min-width: 0;
 		padding: 0;
-		transform: scale(0.9);
+		transform: scale(0.55, 0.85);
 	}
 }
 
 @keyframes rise {
 	from {
 		opacity: 0;
-		transform: translateY(18px) scale(0.94);
+		transform: translateY(24px) scale(0.85, 1.1);
 	}
 }
-
 
 @keyframes fade-up {
 	from {
@@ -603,27 +581,13 @@ body {
 @keyframes fade-scale {
 	from {
 		opacity: 0;
-		transform: scale(0.98);
+		transform: scale(0.94, 0.97);
 	}
 }
 
 @keyframes spin {
 	to {
 		transform: rotate(360deg);
-	}
-}
-
-@keyframes toast-in {
-	from {
-		opacity: 0;
-		transform: translate(-50%, 8px);
-	}
-}
-
-@keyframes toast-out {
-	to {
-		opacity: 0;
-		transform: translate(-50%, 6px);
 	}
 }
 
@@ -709,18 +673,16 @@ body {
 }
 
 .sj-frame.leaving {
-	animation: fade-out var(--dur-mid) var(--ease-in-out) forwards;
+	animation: fade-out var(--dur-exit) var(--ease-in-out) forwards;
 	pointer-events: none;
 }
 
 /* ---- tabs ---- */
 
 .tab.closing {
-	animation: tab-out var(--dur-mid) var(--ease-in-out) forwards;
+	animation: tab-out var(--dur-exit) var(--ease-in-out) forwards;
 	pointer-events: none;
 }
-
-
 
 /* the site's icon at the start of each tab */
 .tab-icon {
@@ -784,8 +746,6 @@ body {
 		transform 0.25s ease;
 }
 
-
-
 /* ---- buttons ---- */
 
 .icon-btn {
@@ -794,18 +754,12 @@ body {
 		transform var(--dur-mid) var(--ease-out);
 }
 
-.icon-btn:active {
-	transform: scale(0.94);
-}
-
-
-
 #btn-back:active {
-	transform: translateX(-2px) scale(0.94);
+	transform: translateX(-2px);
 }
 
 #btn-forward:active {
-	transform: translateX(2px) scale(0.94);
+	transform: translateX(2px);
 }
 
 #btn-reload.spin {
@@ -821,6 +775,14 @@ body {
 }
 
 /* ---- logo and title ---- */
+
+/* the globe leans a little to the left, turning around its slanted axis (the big one on the new
+   tab page and the little one by the tabs) */
+.globe {
+	transform: rotate(-10deg);
+	transform-box: fill-box;
+	transform-origin: center;
+}
 
 /* the globe turns: each meridian widens and narrows like a line of longitude passing round */
 .globe .meridian {
@@ -848,8 +810,8 @@ body {
 @keyframes focus-in {
 	from {
 		opacity: 0;
-		filter: blur(3px);
-		transform: scale(0.99);
+		filter: blur(6px);
+		transform: scale(0.95, 0.975);
 	}
 }
 
@@ -884,16 +846,6 @@ body {
 		opacity 0.4s 0.25s ease;
 }
 
-/* ---- error toast ---- */
-
-#toast {
-	animation: toast-in var(--dur-slow) var(--ease-out);
-}
-
-#toast.leaving {
-	animation: toast-out var(--dur-mid) var(--ease-in-out) forwards;
-}
-
 /* ---- "Reduce motion" (a setting that starts out matching the system) turns all of the above off ---- */
 
 :root[data-motion="reduced"] *,
@@ -902,7 +854,6 @@ body {
 	animation: none !important;
 	transition: none !important;
 }
-
 
 /* ============================================================
    SHORTCUTS, RECENT SITES, ADDRESS SUGGESTIONS
@@ -1117,7 +1068,6 @@ body {
 	animation: fade-up 0.9s 3.5s ease both;
 }
 
-
 /* ============================================================
    THEMES
    Each theme just swaps these variables. Everything else follows.
@@ -1312,7 +1262,7 @@ body {
 @keyframes pop-in {
 	from {
 		opacity: 0;
-		transform: translateY(-4px) scale(0.98);
+		transform: translateY(-10px) scale(0.85, 1.12);
 	}
 }
 
@@ -1681,7 +1631,7 @@ body {
 @keyframes settings-in {
 	from {
 		opacity: 0;
-		transform: translateY(8px) scale(0.985);
+		transform: translateY(24px) scale(0.86, 1.08);
 	}
 }
 
@@ -1910,7 +1860,6 @@ body {
 .settings-themes {
 	margin: 16px 0 2px;
 }
-
 
 /* ---------- the settings panel: a list of sections on the left, settings on cards to the right ---------- */
 
@@ -2296,7 +2245,7 @@ body {
 @keyframes palette-in {
 	from {
 		opacity: 0;
-		transform: translateY(-6px) scale(0.985);
+		transform: translateY(-18px) scale(0.86, 1.1);
 	}
 }
 
@@ -2362,6 +2311,94 @@ body {
 	color: var(--moon-light);
 }
 
+/* (people's pictures, round) */
+.palette-icon.kind-chat img {
+	width: 28px;
+	height: 28px;
+	border-radius: 50%;
+	object-fit: cover;
+}
+
+/* ---------- every keyboard shortcut ("?") ---------- */
+
+.keys-dialog {
+	width: min(760px, calc(100vw - 32px));
+	max-height: calc(100vh - 24vh);
+	margin-top: 10vh;
+	overflow-y: auto;
+}
+
+.keys-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 18px 16px 4px 22px;
+}
+
+.keys-head h2 {
+	margin: 0;
+	font-family: "Cormorant Garamond", Georgia, serif;
+	font-style: italic;
+	font-weight: 500;
+	font-size: 26px;
+}
+
+.keys-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+	gap: 8px 28px;
+	padding: 6px 22px 22px;
+}
+
+.keys-group h3 {
+	margin: 14px 0 6px;
+	color: color-mix(in srgb, var(--starlight) 45%, transparent);
+	font: 500 10px/1 "Unbounded", sans-serif;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+}
+
+.keys-group dl {
+	display: flex;
+	flex-direction: column;
+	margin: 0;
+}
+
+.keys-group dl > div {
+	display: grid;
+	grid-template-columns: 128px minmax(0, 1fr);
+	align-items: baseline;
+	gap: 12px;
+	padding: 7px 0;
+	border-bottom: 1px solid color-mix(in srgb, var(--starlight) 6%, transparent);
+}
+
+.keys-group dt {
+	color: color-mix(in srgb, var(--starlight) 60%, transparent);
+	font-size: 12px;
+	white-space: nowrap;
+}
+
+.keys-group dd {
+	margin: 0;
+	color: color-mix(in srgb, var(--starlight) 88%, transparent);
+	font-size: 13.5px;
+}
+
+.keys-group kbd {
+	display: inline-block;
+	min-width: 22px;
+	margin-right: 3px;
+	padding: 2px 6px;
+	border: 1px solid color-mix(in srgb, var(--starlight) 14%, transparent);
+	border-bottom-width: 2px;
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--starlight) 6%, transparent);
+	color: var(--starlight);
+	font: 500 11.5px/1.3 "DM Sans", system-ui, sans-serif;
+	text-align: center;
+}
+
 .palette-text {
 	display: flex;
 	flex-direction: column;
@@ -2411,84 +2448,412 @@ body {
 	margin-right: 3px;
 }
 
-/* ---------- notices ---------- */
+/* ---------- notifications ----------
+   Cards stacked in the bottom right corner, newest nearest the corner. Each has a color
+   (--tone) for what kind it is: Slow's accent normally, green, yellow or red. */
 
-.notice {
+.notices {
 	position: fixed;
+	right: 20px;
 	bottom: 20px;
-	left: 50%;
-	z-index: 50;
+	z-index: 70; /* (over games, apps and the chat too) */
 	display: flex;
-	align-items: center;
-	gap: 14px;
-	max-width: min(560px, calc(100vw - 32px));
-	padding: 10px 10px 10px 18px;
-	transform: translateX(-50%);
-	border: 1px solid var(--line);
-	border-radius: 14px;
-	background: color-mix(in srgb, var(--void) 94%, transparent);
-	backdrop-filter: blur(14px);
-	-webkit-backdrop-filter: blur(14px);
-	box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+	flex-direction: column;
+	gap: 10px;
+	width: min(380px, calc(100vw - 32px));
+	pointer-events: none;
 }
 
-.notice.enter {
-	animation: toast-in var(--dur-slow) var(--ease-out);
+.notice {
+	--tone: var(--aurora);
+	position: relative;
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	align-items: start;
+	gap: 12px;
+	padding: 12px 8px 12px 12px;
+	overflow: hidden;
+	border: 1px solid color-mix(in srgb, var(--tone) 24%, var(--line));
+	border-radius: 18px;
+	background:
+		radial-gradient(130% 150% at 0% 0%, color-mix(in srgb, var(--tone) 13%, transparent), transparent 60%),
+		color-mix(in srgb, var(--void) 90%, transparent);
+	backdrop-filter: blur(18px) saturate(150%);
+	-webkit-backdrop-filter: blur(18px) saturate(150%);
+	box-shadow:
+		0 18px 44px rgba(0, 0, 0, 0.5),
+		inset 0 1px 0 rgba(255, 255, 255, 0.07);
+	color: var(--starlight);
+	pointer-events: auto;
+	touch-action: pan-y;
+	user-select: none;
+	animation: notice-in var(--dur-slow) var(--ease-out);
+	transition:
+		transform var(--dur-mid) var(--ease-out),
+		opacity var(--dur-mid) ease,
+		border-color var(--dur-fast) ease;
+}
+
+.tone-success {
+	--tone: #6dffb1;
+}
+
+.tone-warning {
+	--tone: #ffd166;
+}
+
+.tone-error {
+	--tone: #ff6b8a;
+}
+
+/* the same notification again (another chat message): a little nudge instead of a new card */
+.notice.again {
+	animation: notice-again var(--dur-mid) var(--ease-out);
+}
+
+.notice.clickable {
+	cursor: pointer;
+}
+
+.notice.clickable:hover {
+	border-color: color-mix(in srgb, var(--tone) 50%, var(--line));
+}
+
+.notice.swiping {
+	cursor: grabbing;
+	transition: none;
 }
 
 .notice.leaving {
-	animation: toast-out var(--dur-mid) var(--ease-in-out) forwards;
+	pointer-events: none;
+	animation: notice-out 260ms var(--ease-in-out) forwards;
 }
 
-#notice-text {
-	margin: 0;
+/* the picture on the left: an icon, or a person's picture */
+.notice-art {
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 36px;
+	height: 36px;
+	overflow: hidden;
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--tone) 15%, transparent);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 26%, transparent);
+	color: var(--tone);
+}
+
+.notice-art svg {
+	width: 19px;
+	height: 19px;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.8;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.notice-art svg .fill {
+	fill: currentColor;
+	stroke: none;
+}
+
+.notice-art.person {
+	border-radius: 50%;
+	background: linear-gradient(145deg, color-mix(in srgb, var(--tint, var(--aurora)) 90%, white), color-mix(in srgb, var(--tint, var(--aurora)) 70%, black));
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+	color: #fff;
+	font: 600 13px/1 "DM Sans", sans-serif;
+}
+
+.notice-art.person img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.notice-body {
+	min-width: 0;
+}
+
+.notice-title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 1px 0 2px;
 	font-size: 14px;
-	line-height: 1.4;
+	font-weight: 500;
+	line-height: 1.3;
+}
+
+.notice-title > span:first-child {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.notice-count {
+	flex: none;
+	padding: 2px 7px;
+	border-radius: 9px;
+	background: var(--tone);
+	color: var(--void);
+	font-size: 11px;
+	font-weight: 500;
+	line-height: 1.2;
+}
+
+.notice-text {
+	display: -webkit-box;
+	margin: 0;
+	overflow: hidden;
+	color: color-mix(in srgb, var(--starlight) 78%, transparent);
+	font-size: 13.5px;
+	line-height: 1.42;
+	overflow-wrap: anywhere;
+	-webkit-line-clamp: 3;
+	-webkit-box-orient: vertical;
+}
+
+/* (just a line of text, no title: it sits level with the picture) */
+.notice-body > .notice-text:first-child {
+	padding-top: 8px;
+	color: var(--starlight);
+	font-size: 14px;
+}
+
+.notice-detail {
+	max-height: 4.2em;
+	margin: 6px 0 0;
+	overflow: hidden;
+	color: color-mix(in srgb, var(--starlight) 55%, transparent);
+	font: 11.5px/1.4 ui-monospace, "Cascadia Code", Consolas, monospace;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	user-select: text;
 }
 
 .notice-actions {
 	display: flex;
-	flex: none;
+	flex-wrap: wrap;
 	gap: 6px;
-}
-
-.notice-actions:empty {
-	display: none;
+	margin-top: 10px;
 }
 
 .notice-btn {
-	height: 32px;
+	height: 30px;
 	padding: 0 14px;
-	border: none;
-	border-radius: 16px;
-	background: var(--glass-strong);
+	border: 1px solid var(--line);
+	border-radius: 15px;
+	background: var(--glass);
 	color: var(--starlight);
 	font: inherit;
 	font-size: 13px;
+	font-weight: 500;
 	white-space: nowrap;
 	cursor: pointer;
-	transition: background var(--dur-fast) ease;
+	transition:
+		background var(--dur-fast) ease,
+		filter var(--dur-fast) ease,
+		transform var(--dur-fast) ease;
 }
 
 .notice-btn:first-child {
-	background: color-mix(in srgb, var(--aurora) 85%, transparent);
+	border-color: transparent;
+	background: var(--tone);
 	color: var(--void);
-	font-weight: 500;
 }
 
 .notice-btn:hover {
+	background: var(--glass-strong);
+}
+
+.notice-btn:first-child:hover {
+	background: var(--tone);
 	filter: brightness(1.12);
 }
 
-.notice-btn:focus-visible {
-	outline: 2px solid var(--aurora);
+.notice-btn:focus-visible,
+.notice-x:focus-visible {
+	outline: 2px solid var(--tone);
 	outline-offset: 2px;
 }
 
+.notice-btn[hidden] {
+	display: none;
+}
+
+/* a reply, written right in a chat notification */
+.notice-reply {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	margin-top: 10px;
+	padding: 3px 3px 3px 12px;
+	border: 1px solid color-mix(in srgb, var(--tone) 40%, var(--line));
+	border-radius: 18px;
+	background: color-mix(in srgb, var(--void) 60%, transparent);
+	animation: notice-reply-in var(--dur-mid) var(--ease-liquid);
+	transform-origin: 0 0;
+}
+
+.notice-reply[hidden] {
+	display: none;
+}
+
+.notice-reply:focus-within {
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 18%, transparent);
+}
+
+.notice-reply input {
+	flex: 1;
+	min-width: 0;
+	height: 28px;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--starlight);
+	font: inherit;
+	font-size: 13.5px;
+	outline: none;
+}
+
+.notice-reply input::placeholder {
+	color: color-mix(in srgb, var(--starlight) 45%, transparent);
+}
+
+.notice-send {
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: var(--tone);
+	color: var(--void);
+	cursor: pointer;
+}
+
+.notice-send .ico {
+	width: 15px;
+	height: 15px;
+}
+
+.notice-reply.sending {
+	opacity: 0.6;
+}
+
+.notice-sent {
+	padding: 5px 0;
+	color: color-mix(in srgb, var(--tone) 80%, white);
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.notice-sent::before {
+	content: "✓ ";
+}
+
+@keyframes notice-reply-in {
+	from {
+		opacity: 0;
+		transform: scale(0.9, 0.6);
+	}
+}
+
+.notice-x {
+	display: grid;
+	place-items: center;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: none;
+	color: color-mix(in srgb, var(--starlight) 55%, transparent);
+	cursor: pointer;
+	transition:
+		background var(--dur-fast) ease,
+		color var(--dur-fast) ease;
+}
+
+.notice-x:hover {
+	background: var(--glass-strong);
+	color: var(--starlight);
+}
+
+.notice-x svg {
+	width: 15px;
+	height: 15px;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 2;
+	stroke-linecap: round;
+}
+
+/* a thin bar along the bottom counts down until it goes by itself (it waits while you point at it) */
+.notice.timed::after {
+	content: "";
+	position: absolute;
+	right: 0;
+	bottom: 0;
+	left: 0;
+	height: 2px;
+	background: var(--tone);
+	opacity: 0.75;
+	transform-origin: left;
+	animation: countdown var(--life, 7s) linear forwards;
+}
+
+.notices.paused .notice::after {
+	animation-play-state: paused;
+}
+
+@keyframes countdown {
+	from {
+		transform: scaleX(1);
+	}
+	to {
+		transform: scaleX(0);
+	}
+}
+
+@keyframes notice-in {
+	from {
+		opacity: 0;
+		transform: translateY(32px) scale(0.8, 1.15);
+	}
+}
+
+@keyframes notice-again {
+	30% {
+		transform: scale(1.04, 0.96);
+	}
+	60% {
+		transform: scale(0.99, 1.02);
+	}
+}
+
+@keyframes notice-out {
+	to {
+		height: 0;
+		margin-top: -10px;
+		padding-top: 0;
+		padding-bottom: 0;
+		border-width: 0;
+		opacity: 0;
+		transform: translateX(110%) scale(1.1, 0.8);
+	}
+}
+
 @media (max-width: 520px) {
-	.notice {
-		flex-direction: column;
-		align-items: stretch;
+	.notices {
+		right: 12px;
+		bottom: 12px;
+		left: 12px;
+		width: auto;
 	}
 }
 
@@ -3553,50 +3918,32 @@ img.game-art.waiting {
 
 .tab-glider {
 	position: absolute;
-	bottom: 0;
+	bottom: 1px;
 	left: 0;
 	z-index: 0;
-	height: 34px;
-	border-radius: 10px 10px 0 0;
-	background: rgba(255, 255, 255, 0.035);
-	box-shadow:
-		inset 0 1px 0 rgba(255, 255, 255, 0.1),
-		0 -6px 18px -10px color-mix(in srgb, var(--moon-base) 70%, transparent);
+	height: 32px;
+	border-radius: 12px;
+	opacity: 0;
 	pointer-events: none;
+	transform-origin: center bottom;
+	will-change: transform, width, opacity;
 }
 
-.tab-glider.ready {
-	transition:
-		transform var(--dur-slow) var(--ease-out),
-		width var(--dur-slow) var(--ease-out),
-		opacity var(--dur-mid) ease;
+/* buttons with a drop of glass flowing between them: the drop is their hover look */
+.has-lens > .icon-btn,
+.has-lens > .home-app {
+	position: relative;
+	z-index: 1;
 }
 
-/* ---------- notice countdown bar ---------- */
-
-.notice {
-	overflow: hidden;
+.toolbar.has-lens > .icon-btn:hover,
+.home-apps.has-lens > .home-app:hover {
+	border-color: transparent;
+	background: transparent;
 }
 
-.notice.timed::after {
-	content: "";
-	position: absolute;
-	left: 0;
-	right: 0;
-	bottom: 0;
-	height: 2px;
-	background: linear-gradient(90deg, var(--moon-base), var(--aurora));
-	transform-origin: left;
-	animation: countdown var(--life, 7s) linear forwards;
-}
-
-@keyframes countdown {
-	from {
-		transform: scaleX(1);
-	}
-	to {
-		transform: scaleX(0);
-	}
+.home-apps.has-lens > .liquid-lens {
+	z-index: 0;
 }
 
 /* ---------- home logo: the "web" globe icon ---------- */
@@ -4299,7 +4646,8 @@ img.game-art.waiting {
 @keyframes app-in {
 	from {
 		opacity: 0;
-		transform: scale(0.985);
+		border-radius: 120px;
+		transform: scale(0.82, 0.9);
 	}
 }
 
@@ -4505,6 +4853,7 @@ img.game-art.waiting {
 	border-left: 1px solid var(--line);
 	background: var(--void);
 	box-shadow: -24px 0 60px rgba(0, 0, 0, 0.35);
+	transform-origin: right center;
 }
 
 .chat-dock.enter {
@@ -4529,7 +4878,7 @@ img.game-art.waiting {
 
 @keyframes chat-in {
 	from {
-		transform: translateX(40px);
+		transform: translateX(56px) scaleX(0.92);
 		opacity: 0;
 	}
 }
@@ -4600,8 +4949,8 @@ img.game-art.waiting {
 		right: var(--chat-w);
 	}
 
-	body.chat-docked .notice {
-		left: calc((100% - var(--chat-w)) / 2);
+	body.chat-docked .notices {
+		right: calc(var(--chat-w) + 20px);
 	}
 }
 
@@ -4638,12 +4987,12 @@ img.game-art.waiting {
 	font: 700 10px/13px "DM Sans", sans-serif;
 	text-align: center;
 	box-sizing: border-box;
-	animation: badge-in var(--dur-mid) var(--ease-out);
+	animation: badge-in var(--dur-slow) var(--ease-jelly);
 }
 
 @keyframes badge-in {
 	from {
-		transform: scale(0.4);
+		transform: scale(0.2);
 	}
 }
 
@@ -4708,7 +5057,7 @@ img.game-art.waiting {
 	white-space: nowrap;
 	cursor: pointer;
 	box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
-	animation: toast-in var(--dur-slow) var(--ease-out);
+	animation: notice-in var(--dur-slow) var(--ease-out);
 }
 
 .chat-call[hidden] {
@@ -4727,4 +5076,176 @@ img.game-art.waiting {
 	border-radius: 50%;
 	background: #04170d;
 	animation: call-ring 1.4s ease-in-out infinite;
+}
+
+/* ============================================================
+   LIQUID GLASS on the games page (liquid.js and liquid.css)
+   ============================================================ */
+
+/* the open list: a drop of glass that flows between them */
+.games-views {
+	position: relative;
+}
+
+.games-views.has-lens > .games-view {
+	z-index: 1;
+}
+
+.games-views.has-lens > .games-view.on {
+	background: none;
+}
+
+.games-views.has-lens > .games-view.on::before {
+	display: none;
+}
+
+.games-views > .liquid-lens {
+	border-radius: 12px;
+}
+
+/* the dice and close buttons */
+.games-bar {
+	position: relative;
+}
+
+.games-bar.has-lens > .icon-btn {
+	position: relative;
+	z-index: 1;
+}
+
+.games-bar.has-lens > .icon-btn:hover {
+	background: transparent;
+}
+
+/* cards: glass that catches the light where you point */
+.game-frame::after,
+.games-collection::after,
+.games-hero-art::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	border-radius: inherit;
+	background: radial-gradient(
+		circle at var(--liquid-mx, 30%) var(--liquid-my, 15%),
+		color-mix(in srgb, var(--aurora) 20%, rgba(255, 255, 255, 0.08)),
+		color-mix(in srgb, var(--aurora) 5%, transparent) 38%,
+		transparent 62%
+	);
+	box-shadow: var(--liquid-rim);
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity var(--dur-mid) ease;
+}
+
+.game-open:hover .game-frame::after,
+.game-open:focus-visible .game-frame::after,
+.games-collection:hover::after,
+.games-hero-art:hover::after {
+	opacity: 1;
+}
+
+.games-collection,
+.games-hero-art {
+	position: relative;
+}
+
+.game-play {
+	z-index: 2;
+}
+
+/* ============================================================
+   SHORT SCREENS: Chromebooks and small laptops
+   A 1366×768 Chromebook leaves about 640px of page under the browser's own bar (and less when
+   its display is zoomed), so things get more compact as the screen gets shorter.
+   ============================================================ */
+
+/* the new tab page: the globe, the title and the space between them shrink with the height, so it
+   all fits without scrolling */
+@media (max-height: 800px) {
+	#home {
+		padding-bottom: 46px;
+	}
+
+	.logo {
+		width: clamp(60px, 12.5vh, 128px);
+	}
+
+	#home h1 {
+		margin: 8px 0 2px;
+		font-size: clamp(56px, min(12vw, 15.5vh), 128px);
+	}
+
+	.tagline {
+		margin-bottom: clamp(16px, 4vh, 32px);
+	}
+
+	.quick {
+		margin-top: clamp(18px, 4.5vh, 36px);
+	}
+
+	/* the games page's featured game: a shorter banner, so more games show under it */
+	.games-hero {
+		min-height: 0;
+		padding: 22px 30px;
+	}
+
+	.games-hero-art {
+		width: clamp(110px, 24vh, 200px);
+	}
+
+	.games-hero h3 {
+		font-size: clamp(22px, min(3.2vw, 5.5vh), 40px);
+	}
+}
+
+/* Slow's bar (tabs and address) and the bar over apps: a little slimmer, so pages, movies and
+   games get the room */
+@media (max-height: 720px) {
+	.tabs-row {
+		padding-top: 5px;
+	}
+
+	.tab,
+	.brand {
+		height: 32px;
+	}
+
+	.toolbar {
+		padding-top: 5px;
+		padding-bottom: 5px;
+	}
+
+	.toolbar .icon-btn {
+		width: 34px;
+		height: 34px;
+	}
+
+	#sj-address {
+		height: 34px;
+	}
+
+	.app-bar {
+		height: 46px;
+	}
+}
+
+/* the list of shortcuts ("?"): taller, with tighter rows, so it all shows at once */
+@media (max-height: 720px) {
+	.keys-dialog {
+		margin-top: max(16px, 5vh);
+		max-height: calc(100vh - max(32px, 10vh));
+	}
+
+	.keys-head {
+		padding-top: 12px;
+	}
+
+	.keys-group h3 {
+		margin-top: 10px;
+	}
+
+	.keys-group dl > div {
+		padding: 5px 0;
+	}
 }

@@ -2,7 +2,7 @@
  * A Slow look for the cloud gaming page (the one the cloud button opens). Slow's service worker
  * adds this only to that page. It doesn't change how the page works: it restyles it in Slow's
  * theme colors (cloud-skin.css), adds a header with filters for PC and phone games, and labels
- * each game.
+ * each game. Its liquid glass moves with Slow's own physics (liquid.js, on Slow's page).
  */
 (() => {
 	if (window.__slowCloudSkin) return;
@@ -28,6 +28,7 @@
 
 	const THEME_VARS = ["--void", "--nebula", "--aurora", "--ember", "--starlight", "--glass", "--glass-strong", "--line", "--moon-light"];
 	const slowDoc = slowDocument();
+	const Liquid = slowDoc?.defaultView?.Liquid || null;
 
 	// The proxy would treat the stylesheet's address as one of the website's and send it off to
 	// the website, so it's set with Slow's own (untouched) setter.
@@ -95,6 +96,10 @@
 			chips.append(chip);
 		}
 
+		// A drop of glass slides to the filter you pick; games lean toward the pointer.
+		const chipsLens = Liquid?.lens(chips);
+		Liquid?.tilt(grid, { item: ".slow-card", angle: 7, lift: 4 });
+
 		const oldBox = search.parentElement;
 		head.append(title, search, chips);
 		grid.parentElement.insertBefore(head, grid);
@@ -125,13 +130,14 @@
 				card.classList.toggle("slow-hidden", hide);
 				if (!hide) shown++;
 			}
-			for (const chip of chips.children) {
+			for (const chip of chips.querySelectorAll("button")) {
 				chip.classList.toggle("on", chip.dataset.kind === showing);
 				chip.setAttribute("aria-pressed", String(chip.dataset.kind === showing));
 				chip.lastChild.textContent = String(totals[chip.dataset.kind]);
 			}
 			count.textContent = `${totals.all} games`;
 			empty.hidden = shown > 0;
+			chipsLens?.to(chips.querySelector("button.on"));
 		}
 		new MutationObserver(label).observe(grid, { childList: true });
 		label();

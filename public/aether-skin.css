@@ -1,0 +1,368 @@
+/*
+ * Slow's look for Aether (with aether-skin.js, which repaints Aether's colors in Slow's theme and
+ * marks the parts styled below). --void, --nebula, --aurora, --ember, --starlight, --moon-light and
+ * --moon-base are Slow's theme colors, copied in.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,500;1,600&display=swap");
+
+/* the glass, as in Slow's liquid.css */
+:root {
+	--slow-glass-fill:
+		radial-gradient(120% 90% at 30% 0%, color-mix(in srgb, var(--aurora, #b98cff) 28%, transparent), transparent 62%),
+		linear-gradient(145deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 45%, rgba(255, 255, 255, 0.02)),
+		color-mix(in srgb, var(--aurora, #b98cff) 20%, color-mix(in srgb, var(--void, #07050f) 40%, transparent));
+	--slow-glass-rim:
+		inset 1px 1px 0.5px -0.5px rgba(255, 255, 255, 0.32),
+		inset -1px -1px 0.5px -0.5px rgba(255, 255, 255, 0.1),
+		inset 0 0 0 0.5px color-mix(in srgb, var(--aurora, #b98cff) 45%, transparent);
+}
+
+/* Slow's writing: DM Sans (Aether loads it too), and Slow's italic serif for section titles */
+html:root,
+html:root body {
+	font-family: "DM Sans", system-ui, sans-serif !important;
+}
+
+html:root h2 {
+	font-family: "Cormorant Garamond", Georgia, serif !important;
+	font-style: italic;
+	font-weight: 600;
+	letter-spacing: 0.01em;
+}
+
+/* ---------- Slow's night sky ----------
+   A purple glow from the top corner, a faint one below, and stars that twinkle and drift slowly
+   (they hold still with Slow's "Reduce motion"). */
+
+html:root {
+	background-image:
+		radial-gradient(1200px 700px at 85% -10%, color-mix(in srgb, var(--nebula, #4a2c8f) 42%, transparent), transparent 70%),
+		radial-gradient(900px 600px at -10% 110%, color-mix(in srgb, var(--aurora, #b98cff) 10%, transparent), transparent 70%) !important;
+	background-attachment: fixed !important;
+}
+
+html:root body {
+	background: transparent !important;
+}
+
+/* ---------- Aether's glow and the sparks that fall from it ----------
+   Aether hangs its light a little way down the page, so there was a dark band above it: it hangs
+   at the very top now, and the light and the sparks pour down from there. */
+
+/* (the holder 4 levels up, which Aether centers in its top bar) */
+div:has(> div > div > div > .lightbar) {
+	top: 0 !important;
+	margin-top: 0 !important;
+}
+
+/* The glow is Slow's accent, and fades into Slow's sky rather than into Aether's black, which
+   showed as a dark box. Aether draws it in two halves, which left a seam down the middle at some
+   screen widths, so here it's one piece: brightest straight down from the top, softer to the sides. */
+.lightbar-visual {
+	--slow-glow: color-mix(in srgb, var(--aurora, #b98cff) 55%, transparent);
+	background-image: conic-gradient(
+		from 0deg at 50% 50%,
+		var(--slow-glow) 0deg,
+		color-mix(in srgb, var(--aurora, #b98cff) 16%, transparent) 90deg,
+		transparent 180deg,
+		color-mix(in srgb, var(--aurora, #b98cff) 16%, transparent) 270deg,
+		var(--slow-glow) 360deg
+	) !important;
+	background-size: 100% 100% !important;
+	background-position: center !important;
+}
+
+/* The sparks start right at the top edge (Aether starts them a few dozen pixels down). */
+.lightbar canvas {
+	transform: translateY(-260px) !important;
+	/* (and they fade away before they reach the title, which sits higher on short screens) */
+	-webkit-mask-image: linear-gradient(to bottom, #000 0, #000 clamp(30px, 7vh, 80px), transparent clamp(95px, 17vh, 190px));
+	mask-image: linear-gradient(to bottom, #000 0, #000 clamp(30px, 7vh, 80px), transparent clamp(95px, 17vh, 190px));
+}
+
+html:root body::before,
+html:root body::after {
+	content: "";
+	position: fixed;
+	inset: 0;
+	z-index: -1;
+	pointer-events: none;
+	background-repeat: repeat;
+}
+
+html:root body::before {
+	background-image:
+		radial-gradient(1.4px 1.4px at 12% 22%, var(--starlight, #fff) 50%, transparent 51%),
+		radial-gradient(1px 1px at 38% 68%, var(--starlight, #fff) 50%, transparent 51%),
+		radial-gradient(1.6px 1.6px at 62% 14%, var(--starlight, #fff) 50%, transparent 51%),
+		radial-gradient(1px 1px at 81% 46%, var(--starlight, #fff) 50%, transparent 51%),
+		radial-gradient(1.2px 1.2px at 94% 82%, var(--starlight, #fff) 50%, transparent 51%),
+		radial-gradient(1px 1px at 24% 88%, var(--starlight, #fff) 50%, transparent 51%),
+		radial-gradient(1.3px 1.3px at 55% 40%, var(--starlight, #fff) 50%, transparent 51%);
+	background-size: 360px 360px;
+	opacity: 0.5;
+	animation:
+		slow-twinkle 5s ease-in-out infinite alternate,
+		slow-drift-a 240s linear infinite;
+}
+
+html:root body::after {
+	background-image:
+		radial-gradient(1px 1px at 8% 64%, var(--moon-light, #c4a3ff) 50%, transparent 51%),
+		radial-gradient(1.5px 1.5px at 33% 12%, var(--starlight, #fff) 50%, transparent 51%),
+		radial-gradient(1px 1px at 71% 77%, var(--moon-light, #c4a3ff) 50%, transparent 51%),
+		radial-gradient(1.2px 1.2px at 88% 28%, var(--starlight, #fff) 50%, transparent 51%),
+		radial-gradient(1px 1px at 47% 93%, var(--starlight, #fff) 50%, transparent 51%);
+	background-size: 520px 520px;
+	opacity: 0.35;
+	animation:
+		slow-twinkle 7s -3s ease-in-out infinite alternate,
+		slow-drift-b 360s linear infinite;
+}
+
+@keyframes slow-twinkle {
+	from {
+		opacity: 0.18;
+	}
+	to {
+		opacity: 0.6;
+	}
+}
+
+@keyframes slow-drift-a {
+	to {
+		background-position: 0 -720px;
+	}
+}
+
+@keyframes slow-drift-b {
+	to {
+		background-position: 0 -1040px;
+	}
+}
+
+html[data-slow-motion="reduced"] body::before,
+html[data-slow-motion="reduced"] body::after {
+	animation: none;
+}
+
+::selection {
+	background: color-mix(in srgb, var(--aurora, #b98cff) 40%, transparent);
+}
+
+/* thin scrollbars in the theme's colors, like Slow's */
+html:root {
+	scrollbar-width: thin;
+	scrollbar-color: color-mix(in srgb, var(--starlight, #f3eeff) 18%, transparent) transparent;
+}
+
+:focus-visible {
+	outline-color: var(--aurora, #b98cff) !important;
+}
+
+/* ---------- the home page's title ----------
+   Slow's metallic italic letters, its star-tipped lines on either side, and its tagline */
+
+.slow-title {
+	display: flex !important;
+	align-items: center;
+	justify-content: center;
+	gap: 0.3em;
+	max-width: none !important;
+	font-family: "Cormorant Garamond", Georgia, serif !important;
+	font-style: italic;
+	font-weight: 600 !important;
+	/* (Aether changes its headline now and then; long ones still fit in two lines, and it's sized to
+	   the screen's height too, for short screens like a Chromebook's) */
+	font-size: clamp(30px, min(5vw, 7.5vh), 56px) !important;
+	letter-spacing: 0.02em;
+	line-height: 1.15 !important;
+	text-align: center;
+	text-wrap: balance;
+	color: transparent !important;
+	background-image: linear-gradient(180deg, var(--starlight, #f3eeff) 12%, var(--moon-light, #c4a3ff) 52%, var(--moon-base, #9a66ff) 96%);
+	-webkit-background-clip: text;
+	background-clip: text;
+	filter: drop-shadow(0 0 22px color-mix(in srgb, var(--moon-base, #9a66ff) 45%, transparent));
+}
+
+.slow-title::before,
+.slow-title::after {
+	content: "";
+	flex: none;
+	width: clamp(20px, 4vw, 56px);
+	height: 7px;
+	background:
+		radial-gradient(circle, var(--starlight, #f3eeff) 0 1.5px, color-mix(in srgb, var(--moon-light, #c4a3ff) 60%, transparent) 2.5px, transparent 3.5px) no-repeat,
+		linear-gradient(90deg, transparent, color-mix(in srgb, var(--moon-light, #c4a3ff) 85%, transparent)) no-repeat;
+	background-size: 7px 7px, calc(100% - 9px) 1px;
+	background-position: right center, left center;
+}
+
+.slow-title::after {
+	background:
+		radial-gradient(circle, var(--starlight, #f3eeff) 0 1.5px, color-mix(in srgb, var(--moon-light, #c4a3ff) 60%, transparent) 2.5px, transparent 3.5px) no-repeat,
+		linear-gradient(270deg, transparent, color-mix(in srgb, var(--moon-light, #c4a3ff) 85%, transparent)) no-repeat;
+	background-size: 7px 7px, calc(100% - 9px) 1px;
+	background-position: left center, right center;
+}
+
+/* Aether's title column is 600px wide, which with the star lines broke longer greetings onto three
+   lines: the title gets more room */
+.slow-title-box {
+	width: min(740px, 94vw);
+	margin-left: calc((100% - min(740px, 94vw)) / 2) !important;
+}
+
+/* Aether leaves 11rem above its title and 4rem between the title and the search box, which on a
+   short screen (a Chromebook's) pushed the search box to the bottom and every movie out of sight */
+.slow-hero {
+	margin-top: clamp(36px, 15vh, 11rem) !important;
+}
+
+.slow-hero > .slow-title-box {
+	margin-bottom: clamp(18px, 5vh, 4rem) !important;
+}
+
+.slow-hero > * + * {
+	margin-top: clamp(18px, 5vh, 4rem) !important;
+}
+
+/* (and the room Aether keeps above the Movies / TV Shows tabs, for its "continue watching" row) */
+.pb-20:has(+ div .slow-segment) {
+	padding-bottom: clamp(16px, 5vh, 5rem) !important;
+}
+
+.slow-title-box::after {
+	content: "Take your time.";
+	display: block;
+	margin-top: 8px;
+	font-family: "DM Sans", system-ui, sans-serif;
+	font-size: 17px;
+	color: color-mix(in srgb, var(--starlight, #f3eeff) 60%, transparent);
+}
+
+/* ---------- the search box: Slow's frosted pill ---------- */
+
+.slow-search {
+	border: 1px solid color-mix(in srgb, var(--starlight, #f3eeff) 10%, transparent) !important;
+	border-radius: 27px !important;
+	background: color-mix(in srgb, var(--void, #07050f) 55%, transparent) !important;
+	backdrop-filter: blur(10px) !important;
+	-webkit-backdrop-filter: blur(10px) !important;
+	box-shadow:
+		inset 1px 1px 0.5px -0.5px rgba(255, 255, 255, 0.16),
+		0 14px 34px -16px rgba(0, 0, 0, 0.7) !important;
+	transition:
+		border-color 0.15s,
+		box-shadow 0.15s;
+}
+
+.slow-search [class*="bg-search"] {
+	background: transparent !important;
+}
+
+.slow-search:focus-within {
+	border-color: var(--aurora, #b98cff) !important;
+	box-shadow:
+		0 0 0 4px color-mix(in srgb, var(--aurora, #b98cff) 16%, transparent),
+		0 14px 34px -16px rgba(0, 0, 0, 0.7) !important;
+}
+
+/* ---------- Movies / TV Shows / Editor Picks ----------
+   A drop of glass marks the open one and flows to the next (liquid.js moves it). */
+
+.slow-segment {
+	position: relative;
+}
+
+.slow-segment > button {
+	position: relative;
+	z-index: 1;
+	padding: 8px 20px !important;
+	transform: none !important;
+}
+
+.slow-segment > button.text-type-link {
+	color: var(--starlight, #f3eeff) !important;
+}
+
+.slow-segment > .liquid-lens {
+	position: absolute;
+	top: 0;
+	left: 0;
+	z-index: 0;
+	/* (it's first in the row, and mustn't take the row's spacing) */
+	margin: 0 !important;
+	border-radius: 999px;
+	opacity: 0;
+	pointer-events: none;
+	will-change: transform, width, height, opacity;
+	background: var(--slow-glass-fill);
+	backdrop-filter: blur(6px) saturate(170%);
+	-webkit-backdrop-filter: blur(6px) saturate(170%);
+	box-shadow:
+		var(--slow-glass-rim),
+		0 10px 28px -8px rgba(0, 0, 0, 0.5),
+		0 0 20px -8px color-mix(in srgb, var(--aurora, #b98cff) 35%, transparent);
+}
+
+.slow-segment > .liquid-lens + button {
+	margin-left: 0 !important;
+}
+
+/* ---------- Aether's notice bar along the top: Slow's colors instead of its bright blue ---------- */
+
+[class*="bg-[#126FD3]"] {
+	border-bottom: 1px solid color-mix(in srgb, var(--aurora, #b98cff) 22%, transparent);
+	background: color-mix(in srgb, var(--nebula, #4a2c8f) 45%, var(--void, #07050f)) !important;
+	color: color-mix(in srgb, var(--starlight, #f3eeff) 80%, transparent) !important;
+	font-size: 13px;
+}
+
+[class*="bg-[#126FD3]"] a {
+	color: var(--moon-light, #c4a3ff) !important;
+}
+
+/* ---------- Aether's round buttons at the top left (its name, Discord and the rest): gone ---------- */
+
+/* (their space stays, so Aether's menu button stays at the top right) */
+div:has(> a.tabbable.rounded-full):has(> a[href*="discord"]) {
+	visibility: hidden !important;
+	pointer-events: none !important;
+}
+
+/* ---------- posters ----------
+   Rounder, leaning toward the pointer (liquid.js), and glass that catches the light there */
+
+.slow-poster {
+	border-radius: 16px !important;
+}
+
+.slow-poster::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+	background: radial-gradient(
+		circle at var(--liquid-mx, 30%) var(--liquid-my, 15%),
+		color-mix(in srgb, var(--aurora, #b98cff) 20%, rgba(255, 255, 255, 0.08)),
+		color-mix(in srgb, var(--aurora, #b98cff) 5%, transparent) 38%,
+		transparent 62%
+	);
+	box-shadow: var(--slow-glass-rim);
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.35s ease;
+}
+
+a[href*="tmdb-"]:hover .slow-poster::before {
+	opacity: 1;
+}
+
+/* while a poster leans, it follows the springs instead of transitions */
+.liquid-tilting {
+	transition-property: box-shadow, opacity, background, border-color, filter !important;
+	will-change: transform;
+}

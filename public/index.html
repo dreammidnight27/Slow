@@ -11,7 +11,8 @@
 		<script src="scram/scramjet.all.js"></script>
 		<script src="baremux/index.js"></script>
 
-		<link rel="stylesheet" href="index.css?v=2" />
+		<link rel="stylesheet" href="liquid.css" />
+		<link rel="stylesheet" href="index.css?v=8" />
 		<!-- Applies the "reduce motion" setting before anything animates -->
 		<script>
 			try {
@@ -22,6 +23,7 @@
 		</script>
 		<script src="register-sw.js" defer></script>
 		<script src="search.js" defer></script>
+		<script src="liquid.js" defer></script>
 		<script src="index.js" defer></script>
 	</head>
 
@@ -193,6 +195,48 @@
 		</dialog>
 
 
+		<!-- Every keyboard shortcut ("?" anywhere, or Ctrl+K > Keyboard shortcuts) -->
+		<dialog id="keys" class="palette keys-dialog" aria-labelledby="keys-title">
+			<header class="keys-head">
+				<h2 id="keys-title">Keyboard shortcuts</h2>
+				<button type="button" class="icon-btn keys-x" aria-label="Close" data-keys-close>
+					<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
+				</button>
+			</header>
+			<div class="keys-grid">
+				<section class="keys-group">
+					<h3>Anywhere, even inside websites</h3>
+					<dl>
+						<div><dt><kbd data-mod>Ctrl</kbd><kbd>K</kbd></dt><dd>Search tabs, games, chats and more</dd></div>
+						<div><dt><kbd>Alt</kbd><kbd>T</kbd></dt><dd>New tab</dd></div>
+						<div><dt><kbd>Alt</kbd><kbd>Shift</kbd><kbd>T</kbd></dt><dd>Bring back the tab you closed</dd></div>
+						<div><dt><kbd>Alt</kbd><kbd>W</kbd></dt><dd>Close the tab</dd></div>
+						<div><dt><kbd>Alt</kbd><kbd>1</kbd>–<kbd>8</kbd></dt><dd>Go to tab 1 to 8</dd></div>
+						<div><dt><kbd>Alt</kbd><kbd>←</kbd> <kbd>→</kbd></dt><dd>Back and forward</dd></div>
+						<div><dt><kbd>F5</kbd> or <kbd data-mod>Ctrl</kbd><kbd>R</kbd></dt><dd>Reload the page (<kbd>Shift</kbd> too reloads all of Slow)</dd></div>
+						<div><dt><kbd>Alt</kbd><kbd>L</kbd></dt><dd>Type an address</dd></div>
+						<div><dt><kbd>Alt</kbd><kbd>C</kbd></dt><dd>Open or close the chat</dd></div>
+						<div><dt><kbd>Alt</kbd><kbd>K</kbd></dt><dd>Search, when <kbd data-mod>Ctrl</kbd><kbd>K</kbd> belongs to the website</dd></div>
+					</dl>
+				</section>
+				<section class="keys-group">
+					<h3>In the chat</h3>
+					<dl>
+						<div><dt><kbd>Enter</kbd></dt><dd>Send (<kbd>Shift</kbd><kbd>Enter</kbd> for a new line)</dd></div>
+						<div><dt><kbd>@</kbd></dt><dd>Mention someone (<kbd>Tab</kbd> picks)</dd></div>
+						<div><dt><kbd>/</kbd></dt><dd>Commands, like /status</dd></div>
+						<div><dt><kbd>↑</kbd></dt><dd>Reply to the newest message</dd></div>
+						<div><dt><kbd>Esc</kbd></dt><dd>Close the chat</dd></div>
+					</dl>
+					<h3>On Slow's own pages</h3>
+					<dl>
+						<div><dt>Just type</dt><dd>Search, on the new tab and games pages</dd></div>
+						<div><dt><kbd>?</kbd></dt><dd>This list</dd></div>
+					</dl>
+				</section>
+			</div>
+		</dialog>
+
 		<!-- Right-click menu for tabs: mute and per-tab volume, plus tab actions -->
 		<div id="tab-menu" class="tab-menu hidden" role="menu" aria-label="Tab options">
 			<button id="tab-menu-mute" class="tab-menu-item" type="button" role="menuitem">Mute tab</button>
@@ -206,6 +250,8 @@
 			<div class="tab-menu-divider" role="separator"></div>
 			<button class="tab-menu-item" type="button" role="menuitem" data-action="reload" data-icon="&#8635;">Reload</button>
 			<button class="tab-menu-item" type="button" role="menuitem" data-action="duplicate" data-icon="&#10697;">Duplicate</button>
+			<button class="tab-menu-item" type="button" role="menuitem" data-action="copy" data-icon="&#128279;">Copy link</button>
+			<button class="tab-menu-item" type="button" role="menuitem" data-action="share" data-icon="&#128172;">Share in chat</button>
 			<button class="tab-menu-item" type="button" role="menuitem" data-action="close-others" data-icon="&#8863;">Close other tabs</button>
 			<button class="tab-menu-item" type="button" role="menuitem" data-action="close" data-icon="&times;">Close tab</button>
 		</div>
@@ -213,11 +259,8 @@
 		<!-- Where the link you're pointing at goes -->
 		<div id="link-status" class="link-status" aria-hidden="true"></div>
 
-		<!-- Friendly messages with optional buttons (undo, switch tab, break reminders) -->
-		<div id="notice" class="notice hidden" role="status" aria-live="polite">
-			<p id="notice-text"></p>
-			<div id="notice-actions" class="notice-actions"></div>
-		</div>
+		<!-- Notifications (undo, switch tab, break reminders, chat messages...): they stack in the corner -->
+		<section id="notices" class="notices" aria-label="Notifications"></section>
 
 		<dialog id="shortcut-dialog" class="palette mini-dialog" aria-labelledby="shortcut-dialog-title">
 			<form id="shortcut-form" novalidate>
@@ -631,9 +674,5 @@
 		</div>
 
 		<div id="theme-flash" aria-hidden="true"></div>
-		<div id="toast" class="hidden" role="alert">
-			<p id="sj-error"></p>
-			<pre id="sj-error-code"></pre>
-		</div>
 	</body>
 </html>

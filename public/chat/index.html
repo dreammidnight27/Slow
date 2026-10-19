@@ -5,11 +5,13 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>Chat · Slow</title>
 		<link rel="icon" href="../favicon.svg?v=3" type="image/svg+xml" />
-		<link rel="stylesheet" href="chat.css?v=1" />
+		<link rel="stylesheet" href="../liquid.css" />
+		<link rel="stylesheet" href="chat.css?v=9" />
 		<script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-app-compat.js" crossorigin="anonymous" defer></script>
 		<script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-auth-compat.js" crossorigin="anonymous" defer></script>
 		<script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-database-compat.js" crossorigin="anonymous" defer></script>
-		<script src="chat.js?v=1" defer></script>
+		<script src="../liquid.js" defer></script>
+		<script src="chat.js?v=8" defer></script>
 	</head>
 
 	<body>
@@ -183,28 +185,45 @@
 
 		<!-- Someone's profile -->
 		<dialog id="profile" class="sheet" aria-labelledby="pf-name">
-			<div class="profile-banner" id="pf-banner"></div>
+			<div class="banner profile-banner" id="pf-banner"></div>
 			<div class="profile-top">
 				<span id="pf-avatar" class="avatar-slot"></span>
 				<div class="profile-names">
-					<h2 id="pf-name" class="profile-name"></h2>
+					<h2 class="profile-name"><span id="pf-name"></span> <span id="pf-pronouns" class="pronouns" hidden></span></h2>
 					<p id="pf-status" class="profile-status"></p>
 					<div id="pf-tags" class="tags"></div>
 				</div>
 			</div>
-			<div class="level-card">
-				<div class="level-row"><span id="pf-rank" class="rank"></span><span id="pf-level" class="level-num"></span></div>
-				<div class="xp-track"><div id="pf-xp" class="xp-fill"></div></div>
-				<div class="level-row muted"><span id="pf-xp-text"></span></div>
-				<dl class="facts">
-					<div><dt>Messages</dt><dd id="pf-count"></dd></div>
-					<div><dt>Joined</dt><dd id="pf-since"></dd></div>
-				</dl>
-			</div>
+			<p id="pf-mood" class="mood-line" hidden><span id="pf-mood-emoji" class="mood-emoji"></span><span id="pf-mood-text"></span></p>
 			<p id="pf-bio" class="bio"></p>
-			<div class="sheet-actions">
-				<button id="pf-voice" class="btn" type="button">Voice</button>
-				<button id="pf-video" class="btn" type="button">Video</button>
+			<!-- Their level and stats, opened with the Stats button -->
+			<div id="pf-stats" class="stats-drawer" role="region" aria-label="Stats" hidden>
+				<div class="stats-inner level-card-box">
+					<div id="pf-level-card" class="level-card">
+						<span id="pf-ring" class="level-ring" role="img"><span id="pf-level" class="level-num"></span></span>
+						<span class="level-text">
+							<span id="pf-rank" class="rank"></span>
+							<span id="pf-xp-text" class="xp-text"></span>
+						</span>
+						<dl class="facts">
+							<div><dt>Messages</dt><dd id="pf-count"></dd></div>
+							<div><dt>Joined</dt><dd id="pf-since"></dd></div>
+						</dl>
+					</div>
+				</div>
+			</div>
+			<div class="sheet-actions profile-actions">
+				<button id="pf-stats-btn" class="btn stats-btn" type="button" aria-expanded="false" aria-controls="pf-stats">
+					<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19.5V13M10 19.5V8.5M15 19.5V11.5M20 19.5V5" /></svg>
+					Stats
+					<svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 14 5-5 5 5" /></svg>
+				</button>
+				<button id="pf-voice" class="btn btn-icon" type="button" aria-label="Voice call" title="Voice call">
+					<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 3.5h2.6l1.4 4.2-2 1.5a11 11 0 0 0 6.2 6.2l1.5-2 4.2 1.4v2.6a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 4.6 5.7a2 2 0 0 1 2-2.2Z" /></svg>
+				</button>
+				<button id="pf-video" class="btn btn-icon" type="button" aria-label="Video call" title="Video call">
+					<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6.5" width="12.5" height="11" rx="2.5" /><path d="m15.5 10.5 5.5-3v9l-5.5-3" /></svg>
+				</button>
 				<button id="pf-message" class="btn primary" type="button">Message</button>
 				<button id="pf-edit" class="btn primary" type="button">Edit profile</button>
 			</div>
@@ -214,28 +233,112 @@
 		</dialog>
 
 		<!-- Editing your profile -->
-		<dialog id="edit" class="sheet" aria-labelledby="edit-title">
+		<dialog id="edit" class="sheet edit-sheet" aria-labelledby="edit-title">
 			<h2 id="edit-title" class="sheet-title">Your profile</h2>
-			<div class="edit-pic">
-				<span id="edit-avatar" class="avatar-slot"></span>
-				<div class="edit-pic-actions">
-					<label class="btn" for="edit-file">Choose a picture</label>
-					<input id="edit-file" type="file" accept="image/*" hidden />
-					<button id="edit-remove" class="link-btn" type="button">Remove picture</button>
+			<div class="edit-layout">
+				<!-- How it'll look, as you change it -->
+				<div class="edit-preview">
+					<div class="preview-card">
+						<button id="ed-banner" class="banner preview-banner" type="button" aria-label="Upload a banner picture">
+							<span class="banner-hint"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4.5M7.5 9 12 4.5 16.5 9" /><path d="M4.5 14.5v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3" /></svg>Banner</span>
+						</button>
+						<div class="profile-top">
+							<button id="ed-avatar" class="preview-avatar" type="button" aria-label="Upload a picture"></button>
+							<div class="profile-names">
+								<p class="profile-name"><span id="ed-name"></span> <span id="ed-pronouns" class="pronouns" hidden></span></p>
+								<p id="ed-level" class="profile-status"></p>
+							</div>
+						</div>
+						<p id="ed-mood" class="mood-line" hidden><span id="ed-mood-emoji" class="mood-emoji"></span><span id="ed-mood-text"></span></p>
+						<p id="ed-bio" class="bio"></p>
+					</div>
+					<div class="preview-msg" aria-hidden="true">
+						<span id="ed-msg-avatar" class="avatar-slot"></span>
+						<div>
+							<span id="ed-msg-name" class="preview-msg-name"></span>
+							<span class="preview-bubble">This is how you look in chats.</span>
+						</div>
+					</div>
+				</div>
+
+				<div class="edit-controls">
+					<section class="edit-group" aria-labelledby="edit-pic-title">
+						<h3 id="edit-pic-title" class="label">Picture</h3>
+						<div class="edit-row">
+							<label class="btn" for="edit-file">
+								<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4.5M7.5 9 12 4.5 16.5 9" /><path d="M4.5 14.5v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3" /></svg>Upload
+							</label>
+							<input id="edit-file" type="file" accept="image/*" hidden />
+							<button id="edit-link" class="btn" type="button">From a link</button>
+							<button id="edit-remove" class="link-btn" type="button">Remove</button>
+						</div>
+						<div id="edit-url-row" class="field edit-url" hidden>
+							<input id="edit-url" type="url" placeholder="https://… a picture's link" autocomplete="off" spellcheck="false" aria-label="A picture's link" />
+							<button id="edit-url-go" class="btn" type="button">Use</button>
+						</div>
+					</section>
+
+					<section class="edit-group" aria-labelledby="edit-frame-title">
+						<h3 id="edit-frame-title" class="label">Ring</h3>
+						<div id="edit-frames" class="frame-tiles"></div>
+					</section>
+
+					<section class="edit-group" aria-labelledby="edit-color-title">
+						<h3 id="edit-color-title" class="label">Color</h3>
+						<div id="edit-colors" class="swatches"></div>
+					</section>
+
+					<section class="edit-group" aria-labelledby="edit-banner-title">
+						<h3 id="edit-banner-title" class="label">Banner</h3>
+						<div id="edit-banners" class="banner-tiles"></div>
+						<input id="edit-banner-file" type="file" accept="image/*" hidden />
+					</section>
+
+					<section class="edit-group" aria-labelledby="edit-status-title">
+						<h3 id="edit-status-title" class="label">Status</h3>
+						<div class="status-box">
+							<button id="edit-emoji" class="emoji-btn" type="button" aria-label="Pick an emoji" aria-expanded="false" aria-controls="edit-emoji-grid"></button>
+							<input id="edit-status" type="text" maxlength="60" placeholder="What are you up to?" autocomplete="off" aria-labelledby="edit-status-title" />
+							<button id="edit-status-clear" class="icon-btn small" type="button" aria-label="Clear your status" title="Clear">
+								<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
+							</button>
+						</div>
+						<div id="edit-emoji-grid" class="emoji-grid" hidden></div>
+						<div id="edit-status-picks" class="status-picks"></div>
+					</section>
+
+					<label class="field">
+						<span>Pronouns <em>(optional)</em></span>
+						<input id="edit-pronouns" type="text" maxlength="24" placeholder="they/them" autocomplete="off" spellcheck="false" />
+					</label>
+					<label class="field">
+						<span>Bio <em id="edit-count" class="field-count">0/240</em></span>
+						<textarea id="edit-bio" rows="3" maxlength="240" placeholder="Tell people something about you"></textarea>
+					</label>
 				</div>
 			</div>
-			<label class="field">
-				<span>Or paste a picture's link</span>
-				<input id="edit-url" type="url" placeholder="https://…" autocomplete="off" spellcheck="false" />
-			</label>
-			<label class="field">
-				<span>Bio <em id="edit-count" class="field-count">0/240</em></span>
-				<textarea id="edit-bio" rows="3" maxlength="240" placeholder="Tell people something about you"></textarea>
-			</label>
 			<p id="edit-error" class="form-error" role="alert" hidden></p>
 			<div class="sheet-actions">
 				<button class="btn quiet" type="button" data-close>Cancel</button>
 				<button id="edit-save" class="btn primary" type="button">Save</button>
+			</div>
+		</dialog>
+
+		<!-- Moving and zooming a picture to fit -->
+		<dialog id="crop" class="sheet crop-sheet" aria-labelledby="crop-title">
+			<h2 id="crop-title" class="sheet-title">Fit your picture</h2>
+			<div id="crop-stage" class="crop-stage" tabindex="0" aria-label="Drag to move the picture; scroll or use plus and minus to zoom">
+				<img id="crop-img" alt="" draggable="false" />
+				<span class="crop-frame" aria-hidden="true"></span>
+			</div>
+			<label class="crop-zoom">
+				<svg class="ico small-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="6" width="14" height="12" rx="2" /><path d="m6 16 4-3.5 3 2.5 2-1.5 3 2.5" /></svg>
+				<input id="crop-zoom" type="range" min="1" max="4" step="0.01" value="1" aria-label="Zoom" />
+				<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="2.5" /><circle cx="9" cy="10" r="1.6" /><path d="m4 17.5 5-4.5 3.5 3 3-2.5 4.5 4" /></svg>
+			</label>
+			<div class="sheet-actions">
+				<button class="btn quiet" type="button" data-close>Cancel</button>
+				<button id="crop-use" class="btn primary" type="button">Use it</button>
 			</div>
 		</dialog>
 
@@ -269,6 +372,25 @@
 			<div class="sheet-actions">
 				<button class="btn quiet" type="button" data-close>Cancel</button>
 				<button id="group-confirm" class="btn primary" type="button">Create group</button>
+			</div>
+		</dialog>
+
+		<!-- Sharing a page from Slow into a chat -->
+		<dialog id="share" class="sheet" aria-labelledby="share-title">
+			<h2 id="share-title" class="sheet-title">Share in a chat</h2>
+			<div class="share-card">
+				<span class="share-icon" aria-hidden="true">
+					<svg class="ico" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></svg>
+				</span>
+				<span class="share-text"><b id="share-page"></b><span id="share-host"></span></span>
+			</div>
+			<label class="field">
+				<span>Send it to</span>
+				<input id="share-find" type="text" placeholder="Find a chat" autocomplete="off" spellcheck="false" />
+			</label>
+			<div id="share-list" class="people"></div>
+			<div class="sheet-actions">
+				<button class="btn quiet" type="button" data-close>Cancel</button>
 			</div>
 		</dialog>
 

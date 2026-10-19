@@ -1,0 +1,114 @@
+{
+  // Rules for Slow's chat (and the Moonplayer chatroom, which uses the same database).
+  // Paste all of this into Firebase console > Realtime Database > Rules, then Publish.
+  //
+  //  - Anyone can read (the chat needs this to find your old DMs before you sign in).
+  //  - You have to be signed in to write anything.
+  //  - Each username belongs to the first account that takes it, for good. Reserved names
+  //    (Dreamid, Admin, Owner...) can't be taken in any spelling.
+  //  - You can only post as yourself, and change only your own profile, banner and XP.
+  //  - A message can be deleted only by whoever wrote it, or by the owner's account (Dreamid).
+  //    Nobody can change someone else's message (reactions are separate, so they still work).
+  //  - Only the owner's account can give and take away titles.
+  "rules": {
+    "chatrooms": {
+      "$room": {
+        ".read": true,
+
+        "usernames": {
+          "$name": {
+            ".write": "auth != null && !data.exists() && newData.val() === auth.uid && !$name.matches(/^(dreamid|slow|admin|owner|moderator|system|everyone)$/i)",
+            ".validate": "newData.isString()"
+          }
+        },
+
+        "messages": {
+          "$msg": {
+            ".write": "auth != null && ((!data.exists() && newData.exists() && root.child('chatrooms').child($room).child('usernames').child(newData.child('name').val()).val() === auth.uid) || (!newData.exists() && (!data.exists() || data.child('uid').val() === auth.uid || root.child('chatrooms').child($room).child('usernames').child(data.child('name').val()).val() === auth.uid || root.child('chatrooms').child($room).child('usernames').child('Dreamid').val() === auth.uid)))",
+            ".validate": "newData.hasChildren(['name', 'text']) && newData.child('name').isString() && newData.child('text').isString() && newData.child('text').val().length <= 2000",
+            "reactions": {
+              "$emoji": {
+                "$who": {
+                  ".write": "auth != null",
+                  ".validate": "newData.val() === true"
+                }
+              }
+            }
+          }
+        },
+
+        "dms": {
+          "$dm": {
+            "messages": {
+              "$msg": {
+                ".write": "auth != null && ((!data.exists() && newData.exists() && root.child('chatrooms').child($room).child('usernames').child(newData.child('name').val()).val() === auth.uid) || (!newData.exists() && (!data.exists() || data.child('uid').val() === auth.uid || root.child('chatrooms').child($room).child('usernames').child(data.child('name').val()).val() === auth.uid || root.child('chatrooms').child($room).child('usernames').child('Dreamid').val() === auth.uid)))",
+                ".validate": "newData.hasChildren(['name', 'text']) && newData.child('name').isString() && newData.child('text').isString() && newData.child('text').val().length <= 2000",
+                "reactions": {
+                  "$emoji": {
+                    "$who": {
+                      ".write": "auth != null",
+                      ".validate": "newData.val() === true"
+                    }
+                  }
+                }
+              }
+            },
+            "$other": {
+              ".write": "auth != null"
+            }
+          }
+        },
+
+        "groups": {
+          "$gid": {
+            "messages": {
+              "$msg": {
+                ".write": "auth != null && ((!data.exists() && newData.exists() && root.child('chatrooms').child($room).child('usernames').child(newData.child('name').val()).val() === auth.uid) || (!newData.exists() && (!data.exists() || data.child('uid').val() === auth.uid || root.child('chatrooms').child($room).child('usernames').child(data.child('name').val()).val() === auth.uid || root.child('chatrooms').child($room).child('usernames').child('Dreamid').val() === auth.uid)))",
+                ".validate": "newData.hasChildren(['name', 'text']) && newData.child('name').isString() && newData.child('text').isString() && newData.child('text').val().length <= 2000",
+                "reactions": {
+                  "$emoji": {
+                    "$who": {
+                      ".write": "auth != null",
+                      ".validate": "newData.val() === true"
+                    }
+                  }
+                }
+              }
+            },
+            "$other": {
+              ".write": "auth != null"
+            }
+          }
+        },
+
+        "userTitles": {
+          ".write": "auth != null && root.child('chatrooms').child($room).child('usernames').child('Dreamid').val() === auth.uid"
+        },
+
+        "profiles": {
+          "$key": {
+            ".write": "auth != null && (!data.exists() || root.child('chatrooms').child($room).child('usernames').child(data.child('name').val()).val() === auth.uid) && (!newData.exists() || (root.child('chatrooms').child($room).child('usernames').child(newData.child('name').val()).val() === auth.uid && newData.child('name').val().toLowerCase() === $key))"
+          }
+        },
+
+        "banners": {
+          "$key": {
+            ".write": "auth != null && (!data.exists() || root.child('chatrooms').child($room).child('usernames').child(data.child('name').val()).val() === auth.uid) && (!newData.exists() || (root.child('chatrooms').child($room).child('usernames').child(newData.child('name').val()).val() === auth.uid && newData.child('name').val().toLowerCase() === $key))"
+          }
+        },
+
+        "xp": {
+          "$key": {
+            ".write": "auth != null && (!data.exists() || root.child('chatrooms').child($room).child('usernames').child(data.child('name').val()).val() === auth.uid) && (!newData.exists() || (root.child('chatrooms').child($room).child('usernames').child(newData.child('name').val()).val() === auth.uid && newData.child('name').val().toLowerCase() === $key))"
+          }
+        },
+
+        // Everything else (who's online, typing, calls, groups' names and members, the list of
+        // who you've messaged...): anyone who's signed in.
+        "$other": {
+          ".write": "auth != null"
+        }
+      }
+    }
+  }
+}

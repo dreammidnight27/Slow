@@ -169,8 +169,17 @@
 	window.addEventListener(
 		"keydown",
 		(event) => {
+			// F5 / Ctrl+R reload this page in its tab, not all of Slow (Shift too still reloads everything).
+			const mod = event.ctrlKey || event.metaKey;
+			if (!event.shiftKey && !event.altKey && ((event.key === "F5" && !mod) || (mod && event.code === "KeyR"))) {
+				if (slow()?.__slowReload?.()) {
+					event.preventDefault();
+					event.stopImmediatePropagation();
+				}
+				return;
+			}
 			if (!event.altKey || event.ctrlKey || event.metaKey) return;
-			if (!/^(KeyT|KeyW|KeyL|KeyC|Digit[1-8])$/.test(event.code)) return;
+			if (!/^(KeyT|KeyW|KeyL|KeyC|KeyK|ArrowLeft|ArrowRight|Digit[1-8])$/.test(event.code)) return;
 			const host = slow();
 			if (host?.__slowKey?.(event.code, event.shiftKey)) {
 				event.preventDefault();

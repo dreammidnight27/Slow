@@ -13,6 +13,13 @@ body {
 	font-family: "DM Sans", system-ui, sans-serif !important;
 }
 
+/* thin scrollbars in the theme's colors, like Slow's (theirs were bright, with arrows) */
+html,
+html * {
+	scrollbar-width: thin;
+	scrollbar-color: color-mix(in srgb, var(--starlight, #f3eeff) 20%, transparent) transparent;
+}
+
 /* their blue wrapper around everything */
 body > div:has(#gameGrid) {
 	padding: 0 !important;
@@ -230,7 +237,9 @@ body > div:has(#gameGrid) {
 	pointer-events: none;
 }
 
-.slow-hidden {
+/* (as specific as the rule that lays the games out, or that one wins and nothing hides) */
+.slow-hidden,
+#gameGrid > .slow-card.slow-hidden {
 	display: none !important;
 }
 
@@ -300,4 +309,84 @@ body > div:has(#gameGrid) {
 		grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)) !important;
 		gap: 18px 12px !important;
 	}
+}
+
+/* ---------- liquid glass (moved by Slow's liquid.js) ---------- */
+
+/* the filter you picked: a drop of glass that slides between them */
+.slow-cloud-chips {
+	position: relative;
+}
+
+.slow-cloud-chips.has-lens button {
+	position: relative;
+	z-index: 1;
+}
+
+.slow-cloud-chips.has-lens button.on {
+	border-color: transparent;
+	background: none;
+	color: var(--starlight, #f3eeff);
+}
+
+.slow-cloud-chips .liquid-lens {
+	position: absolute;
+	top: 0;
+	left: 0;
+	z-index: 0;
+	border-radius: 18px;
+	opacity: 0;
+	pointer-events: none;
+	will-change: transform, width, height, opacity;
+	background:
+		radial-gradient(120% 90% at 30% 0%, color-mix(in srgb, var(--aurora, #b98cff) 22%, transparent), transparent 60%),
+		linear-gradient(145deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 45%, rgba(255, 255, 255, 0.02)),
+		color-mix(in srgb, var(--aurora, #b98cff) 18%, rgba(8, 6, 18, 0.45));
+	backdrop-filter: blur(6px) saturate(170%);
+	-webkit-backdrop-filter: blur(6px) saturate(170%);
+	box-shadow:
+		inset 1px 1px 0.5px -0.5px rgba(255, 255, 255, 0.32),
+		inset -1px -1px 0.5px -0.5px rgba(255, 255, 255, 0.1),
+		inset 0 0 0 0.5px color-mix(in srgb, var(--aurora, #b98cff) 40%, transparent),
+		0 8px 22px -8px rgba(0, 0, 0, 0.5),
+		0 0 20px -8px color-mix(in srgb, var(--aurora, #b98cff) 40%, transparent);
+}
+
+/* games: glass that catches the light where you point */
+#gameGrid > .slow-card::after {
+	content: "";
+	position: absolute;
+	top: 0;
+	left: 0;
+	z-index: 1;
+	width: 100%;
+	aspect-ratio: 16 / 10;
+	border-radius: 14px;
+	background: radial-gradient(
+		circle at var(--liquid-mx, 30%) var(--liquid-my, 15%),
+		color-mix(in srgb, var(--aurora, #b98cff) 20%, rgba(255, 255, 255, 0.08)),
+		color-mix(in srgb, var(--aurora, #b98cff) 5%, transparent) 36%,
+		transparent 60%
+	);
+	box-shadow:
+		inset 1px 1px 0.5px -0.5px rgba(255, 255, 255, 0.32),
+		inset -1px -1px 0.5px -0.5px rgba(255, 255, 255, 0.1),
+		inset 0 0 0 0.5px color-mix(in srgb, var(--aurora, #b98cff) 32%, transparent);
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.35s ease;
+}
+
+#gameGrid > .slow-card:hover::after {
+	opacity: 1;
+}
+
+.slow-badge {
+	z-index: 2;
+}
+
+/* while a game leans, it follows the springs */
+.liquid-tilting {
+	transition-property: box-shadow, opacity, background, filter !important;
+	will-change: transform;
 }

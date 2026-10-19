@@ -1,0 +1,65 @@
+/*
+ * Liquid glass (with liquid.js). Slow's page and the chat both use this.
+ */
+
+.liquid-defs {
+	position: absolute;
+	width: 0;
+	height: 0;
+	overflow: hidden;
+	pointer-events: none;
+}
+
+/* The glass, in pieces other stylesheets can use too:
+   --liquid-fill (its body), --liquid-rim (light catching its edges) and --liquid-backdrop. */
+:root {
+	--liquid-fill:
+		radial-gradient(120% 90% at 30% 0%, color-mix(in srgb, var(--aurora) 28%, transparent), transparent 62%),
+		linear-gradient(145deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 45%, rgba(255, 255, 255, 0.02)),
+		color-mix(in srgb, var(--aurora) 20%, color-mix(in srgb, var(--void) 40%, transparent));
+	--liquid-rim:
+		inset 1px 1px 0.5px -0.5px rgba(255, 255, 255, 0.32),
+		inset -1px -1px 0.5px -0.5px rgba(255, 255, 255, 0.1),
+		inset 0 0 0 0.5px color-mix(in srgb, var(--aurora) 45%, transparent);
+	--liquid-backdrop: blur(6px) saturate(170%);
+}
+
+/* Glass: clear, a little brighter than what's behind it, with light catching its rim. */
+.liquid-glass {
+	background: var(--liquid-fill);
+	backdrop-filter: var(--liquid-backdrop);
+	-webkit-backdrop-filter: var(--liquid-backdrop);
+	box-shadow:
+		var(--liquid-rim),
+		inset 0 0 16px 1px color-mix(in srgb, var(--aurora) 14%, transparent),
+		0 10px 28px -8px rgba(0, 0, 0, 0.5),
+		0 0 20px -8px color-mix(in srgb, var(--aurora) 35%, transparent);
+}
+
+/* Chrome and Edge: glass bends what's behind it at its rim, like a lens. */
+.liquid-refract .liquid-glass {
+	backdrop-filter: url(#liquid-lens-wide) blur(4px) saturate(170%);
+}
+
+.liquid-refract .liquid-glass.small {
+	backdrop-filter: url(#liquid-lens) blur(3px) saturate(170%);
+}
+
+/* the drop of glass that flows between choices */
+.liquid-lens {
+	position: absolute;
+	top: 0;
+	left: 0;
+	z-index: 0;
+	border-radius: 999px;
+	opacity: 0;
+	pointer-events: none;
+	transform-origin: center;
+	will-change: transform, width, height, opacity;
+}
+
+/* while a card leans (tilt), it follows the springs instead of the stylesheet's transitions */
+.liquid-tilting {
+	transition-property: box-shadow, opacity, background, border-color, filter !important;
+	will-change: transform;
+}
